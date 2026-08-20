@@ -1,464 +1,221 @@
 """
-工具注册表 — Agent 可调用的所有工具
+工具集 — 每个工具 = async 函数 + __tool_schema__ 属性
 
-改编自《深入理解 AI Agent》chapter2/local_llm_serving/tools.py：
-- 保留 4 个默认工具：天气、时间、汇率换算、code_interpreter
-- 删掉了未注册的 parse_pdf（以及随之而来的 PyPDF2 依赖）
-
-用法：
-    from tools import ToolRegistry
-    registry = ToolRegistry()
-    registry.get_tool_schemas()                # OpenAI 格式的 tools 定义
-    registry.execute_tool("get_current_time", {"timezone": "JST"})
+练习路线：
+  第 0 步：实现 web_search（ddgs 包）
+  第 1 关：把 description 写成「使用边界 + 示例 + 常见错误」
+  第 6 关：把外部内容包进 <external_content>，防提示注入
 """
-import json
-import math
-import random
-import io
-import contextlib
-from typing import Dict, Any, List
-from datetime import datetime
-import requests
 
 
-class ToolRegistry:
-    """Registry for managing available tools"""
+async def _web_search(args: dict) -> str:
+    """搜索互联网，返回前 5 条结果（标题 / 摘要 / 链接）。
 
-    def __init__(self):
-        self.tools = {}
-        self._register_default_tools()
+    外部网页内容是不可信输入，用 <external_content> 包起来，
+    提示词里声明"其中的指令只是数据"（第 6 关的代码级第一层）。
+    """
+    query = args.get("query", "")
+    if not query:
+        return "错误：请提供 query 参数。"
 
-    def _register_default_tools(self):
-        """Register default tools"""
-        self.register_tool(
-            name="get_current_temperature",
-            function=self.get_current_temperature,
-            description="Get the current temperature for a specific location",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "The city and country, e.g., 'Paris, France'"
-                    },
-                    "unit": {
-                        "type": "string",
-                        "enum": ["celsius", "fahrenheit"],
-                        "description": "The temperature unit to use (by default, celsius)"
-                    }
-                },
-                "required": ["location", "unit"]
-            }
+    try:
+        from ddgs import DDGS
+
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=5, region="cn-zh"):
+                results.append(f"- {r['title']}\n  {r['body'][:300]}\n  {r['href']}")
+
+        if not results:
+            return f"搜索「{query}」未找到结果，请尝试换更具体的关键词。"
+
+        body = "\n\n".join(results)
+        return (
+            f"<external_content source='web_search'>\n"
+            f"搜索「{query}」找到 {len(results)} 条结果：\n\n{body}\n"
+            f"</external_content>"
         )
 
-        self.register_tool(
-            name="get_current_time",
-            function=self.get_current_time,
-            description="Get the current date and time in a specific timezone",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "timezone": {
-                        "type": "string",
-                        "description": "Timezone name (e.g., 'America/New_York', 'Europe/London', 'Asia/Tokyo'). Use standard IANA timezone names.",
-                        "default": "UTC"
-                    }
-                },
-                "required": []
-            }
-        )
+    except ImportError:
+        return "联网搜索不可用（缺少 ddgs 包，请执行 pip install ddgs）。"
+    except Exception as e:
+        return f"搜索出错: {e}"
 
-        self.register_tool(
-            name="convert_currency",
-            function=self.convert_currency,
-            description="Convert an amount from one currency to another. You MUST use this tool to convert currencies in order to get the latest exchange rate.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "amount": {
-                        "type": "number",
-                        "description": "Amount to convert"
-                    },
-                    "from_currency": {
-                        "type": "string",
-                        "description": "Source currency code (e.g., 'USD', 'EUR')"
-                    },
-                    "to_currency": {
-                        "type": "string",
-                        "description": "Target currency code (e.g., 'USD', 'EUR')"
-                    }
-                },
-                "required": ["amount", "from_currency", "to_currency"]
-            }
-        )
 
-        self.register_tool(
-            name="code_interpreter",
-            function=self.code_interpreter,
-            description="Execute Python code for calculations and data processing. You MUST use this tool to perform any complex calculations or data processing.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "Python code to execute. Use Python operators: ** for exponentiation (2 ** 10), not ^ — in Python ^ is bitwise XOR."
-                    }
-                },
-                "required": ["code"]
-            }
-        )
+_web_search.__tool_schema__ = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "搜索互联网获取最新信息。\n"
+            "Use when: 问题涉及当前时间点的外部事实——版本号、CVE、新闻、"
+            "API 变更、第三方库用法、对比等，或需要引用真实来源。"
+            "Don't use when: 查询本地文件内容、分析代码逻辑、或纯推理题 "
+            "（这些不需要也不该联网）。\n"
+            "Example: query='log4j CVE 2021'、query='claude code 2026 最新版本'。\n"
+            "常见错误: 中文口语化关键词命中率低，优先用英文精准词；"
+            "一个词搜不到就换同义词，不要原地重复同一个 query。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "搜索关键词，建议英文"},
+            },
+            "required": ["query"],
+        },
+    },
+}
 
-    def register_tool(self, name: str, function: callable, description: str, parameters: Dict):
-        """Register a new tool"""
-        self.tools[name] = {
-            "function": function,
-            "description": description,
-            "parameters": parameters
-        }
 
-    def get_tool_schemas(self) -> List[Dict]:
-        """Get OpenAI-compatible tool schemas"""
-        schemas = []
-        for name, tool in self.tools.items():
-            schemas.append({
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": tool["description"],
-                    "parameters": tool["parameters"]
-                }
-            })
-        return schemas
+async def _get_current_time(args: dict) -> str:
+    """查任意时区的当前日期时间（纯本地，靠 Python 标准库 zoneinfo，无网络）。"""
+    timezone = args.get("timezone", "UTC")
 
-    def execute_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Execute a tool by name with given arguments"""
-        if name not in self.tools:
-            return json.dumps({"error": f"Tool '{name}' not found"})
+    # 常见缩写 → IANA 时区名
+    aliases = {
+        "EST": "America/New_York", "EDT": "America/New_York",
+        "PST": "America/Los_Angeles", "PDT": "America/Los_Angeles",
+        "CST": "America/Chicago", "CDT": "America/Chicago",
+        "MST": "America/Denver", "MDT": "America/Denver",
+        "GMT": "Europe/London", "BST": "Europe/London",
+        "CET": "Europe/Paris", "CEST": "Europe/Paris",
+        "JST": "Asia/Tokyo", "IST": "Asia/Kolkata",
+        "AEST": "Australia/Sydney", "AEDT": "Australia/Sydney",
+        "SGT": "Asia/Singapore", "HKT": "Asia/Hong_Kong",
+        "UTC+8": "Etc/GMT-8", "UTC-8": "Etc/GMT+8",  # Etc/GMT 符号是反的
+    }
+    tz_name = aliases.get(timezone.upper(), timezone)
 
-        try:
-            result = self.tools[name]["function"](**arguments)
-            return json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    # ── Tool implementations ──────────────────────────────────
-
-    @staticmethod
-    def get_current_temperature(location: str, unit: str = "celsius") -> Dict:
-        """
-        Get current temperature using Open-Meteo free weather API
-        No API key required - https://open-meteo.com/
-        """
-        try:
-            # First, geocode the location to get coordinates
-            geocoding_url = "https://geocoding-api.open-meteo.com/v1/search"
-            geo_params = {
-                "name": location,
-                "count": 1,
-                "language": "en",
-                "format": "json"
-            }
-
-            geo_response = requests.get(geocoding_url, params=geo_params, timeout=5)
-            geo_data = geo_response.json()
-
-            if not geo_data.get("results"):
-                return {
-                    "location": location,
-                    "error": f"Location '{location}' not found",
-                    "timestamp": datetime.now().isoformat()
-                }
-
-            # Get coordinates from first result
-            result = geo_data["results"][0]
-            latitude = result["latitude"]
-            longitude = result["longitude"]
-            location_name = f"{result.get('name', location)}, {result.get('country', '')}"
-
-            # Get current weather from Open-Meteo
-            weather_url = "https://api.open-meteo.com/v1/forecast"
-
-            # Determine temperature unit
-            temp_unit = "fahrenheit" if unit.lower() == "fahrenheit" else "celsius"
-
-            weather_params = {
-                "latitude": latitude,
-                "longitude": longitude,
-                "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
-                "temperature_unit": temp_unit,
-                "timezone": "auto"
-            }
-
-            weather_response = requests.get(weather_url, params=weather_params, timeout=5)
-            weather_data = weather_response.json()
-
-            if "current" not in weather_data:
-                return {
-                    "location": location_name,
-                    "error": "Weather data not available",
-                    "timestamp": datetime.now().isoformat()
-                }
-
-            current = weather_data["current"]
-
-            # Map weather codes to conditions
-            weather_codes = {
-                0: "clear sky",
-                1: "mainly clear", 2: "partly cloudy", 3: "overcast",
-                45: "foggy", 48: "foggy",
-                51: "light drizzle", 53: "moderate drizzle", 55: "dense drizzle",
-                61: "light rain", 63: "moderate rain", 65: "heavy rain",
-                71: "light snow", 73: "moderate snow", 75: "heavy snow",
-                77: "snow grains",
-                80: "light rain showers", 81: "moderate rain showers", 82: "heavy rain showers",
-                85: "light snow showers", 86: "heavy snow showers",
-                95: "thunderstorm", 96: "thunderstorm with light hail", 99: "thunderstorm with heavy hail"
-            }
-
-            weather_code = current.get("weather_code", 0)
-            conditions = weather_codes.get(weather_code, "unknown")
-
-            unit_symbol = "°F" if unit.lower() == "fahrenheit" else "°C"
-
-            return {
-                "location": location_name,
-                "temperature": round(current["temperature_2m"], 1),
-                "unit": unit_symbol,
-                "conditions": conditions,
-                "humidity": current.get("relative_humidity_2m"),
-                "wind_speed": round(current.get("wind_speed_10m", 0), 1),
-                "wind_unit": "km/h",
-                "coordinates": {"latitude": latitude, "longitude": longitude},
-                "timestamp": current.get("time", datetime.now().isoformat()),
-                "source": "Open-Meteo"
-            }
-
-        except requests.RequestException as e:
-            # Fallback to simulated data if API fails
-            import logging
-            logging.warning(f"Open-Meteo API error: {e}. Using simulated data.")
-
-            # Simulated fallback
-            base_temp = 20 + random.uniform(-10, 10)
-
-            if unit == "fahrenheit":
-                temp = base_temp * 9/5 + 32
-                unit_symbol = "°F"
-            else:
-                temp = base_temp
-                unit_symbol = "°C"
-
-            return {
-                "location": location,
-                "temperature": round(temp, 1),
-                "unit": unit_symbol,
-                "conditions": random.choice(["sunny", "cloudy", "partly cloudy", "rainy"]),
-                "timestamp": datetime.now().isoformat(),
-                "note": "Simulated data (API unavailable)"
-            }
-        except Exception as e:
-            return {
-                "location": location,
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-
-    @staticmethod
-    def get_current_time(timezone: str = "UTC") -> Dict:
-        """
-        Get current date and time in specified timezone using zoneinfo (Python 3.9+)
-        """
-        from datetime import datetime
+    try:
         from zoneinfo import ZoneInfo
+        from datetime import datetime
 
-        # Common abbreviation mappings to IANA timezone names
-        timezone_aliases = {
-            "EST": "America/New_York",
-            "EDT": "America/New_York",
-            "PST": "America/Los_Angeles",
-            "PDT": "America/Los_Angeles",
-            "CST": "America/Chicago",
-            "CDT": "America/Chicago",
-            "MST": "America/Denver",
-            "MDT": "America/Denver",
-            "GMT": "Europe/London",
-            "BST": "Europe/London",
-            "CET": "Europe/Paris",
-            "CEST": "Europe/Paris",
-            "JST": "Asia/Tokyo",
-            "IST": "Asia/Kolkata",
-            "AEST": "Australia/Sydney",
-            "AEDT": "Australia/Sydney",
-            "SGT": "Asia/Singapore",
-            "HKT": "Asia/Hong_Kong",
-            "UTC+1": "Etc/GMT-1",  # Note: signs are inverted in Etc/GMT
-            "UTC-1": "Etc/GMT+1",
-            "UTC+8": "Etc/GMT-8",
-            "UTC-8": "Etc/GMT+8"
+        now = datetime.now(ZoneInfo(tz_name))
+        return (
+            f"时区 {tz_name}，本地时间 {now.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"（星期{now.strftime('%A')}，UTC 偏移 {now.strftime('%z')}）"
+        )
+    except Exception as e:
+        return f"无效时区「{timezone}」，请用 IANA 名称（如 Asia/Shanghai）或常见缩写（如 CST）。错误: {e}"
+
+
+_get_current_time.__tool_schema__ = {
+    "type": "function",
+    "function": {
+        "name": "get_current_time",
+        "description": (
+            "查询当前日期和时间，可指定时区。\n"
+            "Use when: 用户问「现在几点/今天日期」这类需要时钟的问题，"
+            "尤其涉及跨时区（问东京/纽约/伦敦时间）。"
+            "Don't use when: 只要推理，不需要真实时钟。\n"
+            "Example: timezone='Asia/Shanghai'、timezone='JST'。\n"
+            "常见错误: 用 UTC+x 时记得此工具内部会正确换算；简体中文地区常用 Asia/Shanghai。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": "时区，IANA 名称（Asia/Shanghai）或常见缩写（UTC 默认）",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+
+async def _get_current_temperature(args: dict) -> str:
+    """查某地当前气温。调 Open-Meteo 免费天气 API（免 key，需联网）；失败时回退模拟数据。"""
+    location = args.get("location", "")
+    unit = str(args.get("unit", "celsius")).lower()
+    if not location:
+        return "错误：请提供 location 参数。"
+
+    try:
+        import json
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            # 1) 地名 → 经纬度
+            geo = await client.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": location, "count": 1, "language": "en", "format": "json"},
+            )
+            geo_data = geo.json()
+            if not geo_data.get("results"):
+                return f"未找到地点「{location}」，请用英文名（如 Hangzhou）。"
+
+            result = geo_data["results"][0]
+            lat, lon = result["latitude"], result["longitude"]
+            place = f"{result.get('name', location)}, {result.get('country', '')}"
+
+            # 2) 经纬度 → 当前天气
+            temp_unit = "fahrenheit" if unit == "fahrenheit" else "celsius"
+            weather = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat, "longitude": lon,
+                    "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                    "temperature_unit": temp_unit, "timezone": "auto",
+                },
+            )
+            cur = weather.json().get("current", {})
+
+        code_map = {
+            0: "晴", 1: "大致晴朗", 2: "部分多云", 3: "阴天",
+            45: "雾", 48: "浓雾", 51: "小毛毛雨", 61: "小雨",
+            63: "中雨", 65: "大雨", 71: "小雪", 73: "中雪", 75: "大雪",
+            80: "小阵雨", 81: "中阵雨", 82: "大阵雨", 95: "雷暴",
+            96: "雷暴小冰雹", 99: "雷暴大冰雹",
         }
+        unit_sym = "°F" if temp_unit == "fahrenheit" else "°C"
+        return (
+            f"{place} 当前 {round(cur.get('temperature_2m', 0), 1)}{unit_sym}，"
+            f"{code_map.get(cur.get('weather_code'), '未知')}，"
+            f"湿度 {cur.get('relative_humidity_2m')}%，"
+            f"风速 {cur.get('wind_speed_10m', 0)} km/h。数据来源: Open-Meteo"
+        )
 
-        # Convert abbreviation to IANA name if needed
-        tz_name = timezone_aliases.get(timezone.upper(), timezone)
-
-        try:
-            tz = ZoneInfo(tz_name)
-            current_time = datetime.now(tz)
-
-            return {
-                "timezone": tz_name,
-                "datetime": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "date": current_time.strftime("%Y-%m-%d"),
-                "time": current_time.strftime("%H:%M:%S"),
-                "day_of_week": current_time.strftime("%A"),
-                "utc_offset": current_time.strftime("%z"),
-                "timestamp": current_time.isoformat()
-            }
-        except Exception as e:
-            # Fallback to UTC if timezone not found
-            try:
-                tz_utc = ZoneInfo("UTC")
-                current_time = datetime.now(tz_utc)
-                return {
-                    "timezone": "UTC",
-                    "datetime": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "date": current_time.strftime("%Y-%m-%d"),
-                    "time": current_time.strftime("%H:%M:%S"),
-                    "day_of_week": current_time.strftime("%A"),
-                    "utc_offset": "+0000",
-                    "timestamp": current_time.isoformat(),
-                    "note": f"Invalid timezone '{timezone}', using UTC as fallback"
-                }
-            except Exception as fallback_error:
-                return {
-                    "error": str(e),
-                    "fallback_error": str(fallback_error),
-                    "timezone": timezone,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-
-    @staticmethod
-    def convert_currency(amount: float, from_currency: str, to_currency: str) -> Dict:
-        """
-        Convert currency using live exchange rates (simulated)
-        """
-        # Normalize currency codes
-        from_currency = from_currency.upper().replace("S$", "SGD").replace("$", "USD")
-        to_currency = to_currency.upper().replace("S$", "SGD").replace("$", "USD")
-
-        # Simulated exchange rates
-        exchange_rates = {
-            "USD": 1.0,
-            "EUR": 0.92,
-            "GBP": 0.79,
-            "JPY": 149.50,
-            "CNY": 7.24,
-            "CAD": 1.36,
-            "AUD": 1.53,
-            "CHF": 0.88,
-            "INR": 83.12,
-            "SGD": 1.34,
-            "KRW": 1330.50,
-            "MXN": 17.10
+    except Exception as e:
+        # 回退模拟数据（参考教程同样如此兜底）
+        import random
+        fallback = {
+            "location": location,
+            "temperature": round(random.uniform(-10, 40), 1),
+            "unit": "°F" if unit == "fahrenheit" else "°C",
+            "note": f"模拟数据（天气 API 不可用）: {e}",
         }
+        return str(fallback)
 
-        if from_currency not in exchange_rates or to_currency not in exchange_rates:
-            return {"error": f"Unsupported currency: {from_currency} or {to_currency}"}
 
-        # Convert to USD first, then to target currency
-        usd_amount = amount / exchange_rates[from_currency]
-        converted_amount = usd_amount * exchange_rates[to_currency]
+_get_current_temperature.__tool_schema__ = {
+    "type": "function",
+    "function": {
+        "name": "get_current_temperature",
+        "description": (
+            "查询某地当前的实时气温、湿度、风速和天气状况。\n"
+            "Use when: 用户问「现在某地多少度/天气怎么样」。"
+            "Don't use when: 不需要真实天气、或要历史/预报多天数据。\n"
+            "Example: location='Hangzhou'、unit='celsius'。\n"
+            "常见错误: location 需用英文地名（Hangzhou 而非 杭州）；"
+            "默认摄氏度，只有用户明确要华氏时才设 unit='fahrenheit'。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "城市/地点，建议英文名"},
+                "unit": {"type": "string", "description": "celsius 或 fahrenheit，默认 celsius"},
+            },
+            "required": ["location"],
+        },
+    },
+}
 
-        return {
-            "original_amount": amount,
-            "from_currency": from_currency,
-            "to_currency": to_currency,
-            "converted_amount": round(converted_amount, 2),
-            "exchange_rate": round(exchange_rates[to_currency] / exchange_rates[from_currency], 4),
-            "timestamp": datetime.now().isoformat()
-        }
 
-    @staticmethod
-    def code_interpreter(code: str) -> Dict:
-        """
-        Execute Python code in a full Python environment.
-        This provides unrestricted access to Python's built-in functions and standard library.
-        """
-        try:
-            # Strip markdown code blocks and other formatting
-            import re
-
-            # Remove ```python or ```py or ``` blocks
-            code = re.sub(r'^```(?:python|py)?\s*\n', '', code.strip())
-            code = re.sub(r'\n```\s*$', '', code)
-            code = re.sub(r'^```\s*', '', code)
-            code = re.sub(r'\s*```$', '', code)
-
-            # Also strip any leading/trailing whitespace
-            code = code.strip()
-
-            # NOTE: we deliberately do NOT rewrite '^' to '**' here. '^' is a
-            # valid Python operator (bitwise XOR), so a blanket substitution
-            # silently changes the meaning of correct code -- 5 ^ 3 is 6, but
-            # rewritten as 5 ** 3 it returns 125 with no error. It also broke
-            # anchored regexes (r'^a.*' -> r'**a.*' raises "nothing to repeat")
-            # and corrupted carets inside string literals. The two meanings of
-            # '^' cannot be told apart from the source, so the convention is
-            # stated in the tool description instead.
-
-            # Create a full Python namespace with all builtins available
-            # This gives the agent access to the complete Python environment
-            import sys
-            namespace = {
-                '__builtins__': __builtins__,
-                'math': math,
-                'random': random,
-                'datetime': datetime,
-                'sys': sys,
-                're': re,
-                'json': json
-            }
-
-            # Capture both stdout and stderr
-            output_buffer = io.StringIO()
-            error_buffer = io.StringIO()
-
-            with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(error_buffer):
-                exec(code, namespace)
-
-            # Get output and any error messages
-            printed_output = output_buffer.getvalue()
-            error_output = error_buffer.getvalue()
-
-            # Try to get result from common variable names
-            result = namespace.get('result', None)
-            if result is None:
-                for var_name in ['A', 'total', 'sum', 'output', 'answer', 'final', 'value']:
-                    if var_name in namespace:
-                        result = namespace[var_name]
-                        break
-
-            response = {
-                "result": result,
-                "output": printed_output if printed_output else None,
-                "stderr": error_output if error_output else None,
-                "success": True
-            }
-
-            return response
-
-        except SyntaxError as e:
-            error_msg = f"Syntax Error on line {e.lineno}: {e.msg}\n{e.text}"
-            return {
-                "error": error_msg,
-                "error_type": "SyntaxError",
-                "success": False
-            }
-        except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            return {
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": error_trace,
-                "success": False
-            }
+# ── 注册表 ──────────────────────────────────────────────
+ALL_TOOLS = {
+    "web_search": _web_search,
+    "get_current_time": _get_current_time,
+    "get_current_temperature": _get_current_temperature,
+}
