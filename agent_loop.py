@@ -17,6 +17,8 @@ import logging
 from typing import AsyncGenerator
 
 from partical.api import chat_with_tools
+from partical.compressor import estimate_tokens, should_compress, compress_tool_results
+from partical.status_bar import StatusBar
 
 logger = logging.getLogger("agent_loop")
 
@@ -90,8 +92,14 @@ async def run_agent_loop(
     tool_executors: dict,
     max_turns: int = 5,
     verbose: bool = False,
+    use_status_bar: bool = True,
+    use_compressor: bool = True,
 ) -> AsyncGenerator[dict, None]:
     """执行 ReAct 循环。
+
+    Args:
+        use_status_bar: 第 3 关的状态栏是否注入。设 False 可做对照实验。
+        use_compressor: 第 4 关的上下文压缩是否启用。设 False 可对照"不压"基线。
 
     yield 事件类型：
       tool_start   {"type", "name", "arguments"}
@@ -99,32 +107,62 @@ async def run_agent_loop(
       token        {"type", "content"}        最终回答文本
       done         {"type", "content"}        循环正常结束
       error        {"type", "message"}
+      compress     {"type", "before_est", "after_est", "merged"}  压缩触发时，
+                   报告压前/压后估算 token 与合并条数，供 main 渲染
       trace        {"type", "turn", "messages", "tools"}  只有 verbose=True 时，
                    每轮调模型前把本次请求的完整 messages 快照发出来，供 /debug 渲染
 
     每轮：
-      1. 调 LLM（带上工具定义）
-      2. 无 tool_calls → 模型给了最终回答 → 结束
-      3. 有 tool_calls → assistant 消息原样放回历史（模型要"看到"自己的决策）
+      1. 历史超预算则上下文压缩（只压 tool 结果）
+      2. 调 LLM（带上工具定义）
+      3. 无 tool_calls → 模型给了最终回答 → 结束
+      4. 有 tool_calls → assistant 消息原样放回历史（模型要"看到"自己的决策）
          → 逐个执行工具 → 结果按 tool_call_id 追加 → 回到顶再调模型
     """
     tool_schemas = _build_schemas(tool_executors)
     prev_cache = None  # 上上轮请求的 KV Cache 数字，随 trace 一起展示
+    bar = StatusBar()  # 第 3 关：状态栏，用代码统计工具调用次数喂给模型
+
+    # 第 4 关：用户的原始问题作为压缩的"任务意图"（摘要按它留什么）
+    task = next((m.get("content") or "" for m in messages if m.get("role") == "user"), "")
 
     for turn in range(1, max_turns + 1):
         logger.info(f"── Agent 轮次 {turn}/{max_turns} ──")
+        bar.on_turn()
 
-        # verbose: 把"即将发给模型"的 messages 快照发出去（深拷贝，避免打印时被后续 append 干扰）
+        # ── 第 4 关：历史超预算就批量压缩（只压 tool 结果，原位替换）──
+        # 压缩动的是 messages（长期历史），与状态栏的"临时追加"相反；
+        # 用 before/after 数字发 compress 事件，让 main 把"压了多少"渲染出来。
+        if use_compressor and should_compress(messages):
+            before_est = estimate_tokens(messages)
+            await compress_tool_results(messages, task)
+            yield {
+                "type": "compress",
+                "before_est": before_est,
+                "after_est": estimate_tokens(messages),
+                "merged": len([m for m in messages
+                               if "[COMPRESSED]" in (m.get("content") or "")]),
+            }
+
+        # ── 第 3 关：把状态栏作为一条【临时】user 消息追加到请求末尾 ──
+        # 关键：只拼进 msgs_to_send（本次请求），messages 保持干净不写历史。
+        # use_status_bar=False 时退化成旧行为（不注入），供对照实验用。
+        if use_status_bar:
+            msgs_to_send = [*messages, {"role": "user", "content": bar.render()}]
+        else:
+            msgs_to_send = messages
+
+        # verbose: 把"即将发给模型"的 messages 快照发出去（含临时状态栏，深拷贝防干扰）
         if verbose:
             yield {
                 "type": "trace",
                 "turn": turn,
-                "messages": copy.deepcopy(messages),
+                "messages": copy.deepcopy(msgs_to_send),
                 "tools": tool_schemas,
                 "cache": prev_cache,  # 上轮请求的 hit/miss（这轮还没发出去）
             }
 
-        response = await chat_with_tools(messages, tool_schemas)
+        response = await chat_with_tools(msgs_to_send, tool_schemas)
         if response["error"]:
             yield {"type": "error", "message": response["error"]}
             return
@@ -149,6 +187,8 @@ async def run_agent_loop(
         messages.append(_assistant_msg_with_tools(content, tool_calls))
 
         for call in tool_calls:
+            bar.on_tool_call(call["name"])  # 第 3 关：执行前记一次，供下一轮状态栏显示
+
             yield {"type": "tool_start", "name": call["name"], "arguments": call["arguments"]}
 
             result = await _execute_one_tool(call["name"], call["arguments"], tool_executors)

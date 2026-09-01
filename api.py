@@ -44,26 +44,31 @@ async def chat_stream(messages: list[dict]):
         "max_tokens": 4096,
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream("POST", DEEPSEEK_URL, headers=_headers(), json=payload) as resp:
-            if resp.status_code != 200:
-                yield f"\n[错误] API 返回 {resp.status_code}"
-                return
-
-            # 逐行解析 SSE：data: {...}，遇到 [DONE] 结束
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data_str = line[6:]
-                if data_str == "[DONE]":
+    # 网络掉线 / 超时也当错误处理：不抛给上层，改成 yield 一条错误行（否则主循环崩掉退出）
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", DEEPSEEK_URL, headers=_headers(), json=payload) as resp:
+                if resp.status_code != 200:
+                    yield f"\n[错误] API 返回 {resp.status_code}"
                     return
-                try:
-                    data = json.loads(data_str)
-                    token = data["choices"][0]["delta"].get("content", "")
-                    if token:
-                        yield token
-                except json.JSONDecodeError:
-                    continue  # 心跳行 / 空行，跳过
+
+                # 逐行解析 SSE：data: {...}，遇到 [DONE] 结束
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(data_str)
+                        token = data["choices"][0]["delta"].get("content", "")
+                        if token:
+                            yield token
+                    except json.JSONDecodeError:
+                        continue  # 心跳行 / 空行，跳过
+    except httpx.HTTPError as exc:
+        # 掉线/超时/连接被重置统一提示，别让异常一路炸到 main 退出
+        yield f"\n[错误] 连接异常：{exc.__class__.__name__}"
 
 
 async def chat_with_tools(messages: list[dict], tools: list[dict] | None = None) -> dict:
@@ -92,27 +97,36 @@ async def chat_with_tools(messages: list[dict], tools: list[dict] | None = None)
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(DEEPSEEK_URL, headers=_headers(), json=payload)
-        if resp.status_code != 200:
-            return {
-                "content": "", "tool_calls": None,
-                "error": f"API {resp.status_code}: {resp.text[:300]}",
-                "cache_hit_tokens": 0, "cache_miss_tokens": 0,
-            }
-
-        data = resp.json()
-        message = data["choices"][0]["message"]
-        usage = data.get("usage", {})
-
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(DEEPSEEK_URL, headers=_headers(), json=payload)
+    except httpx.HTTPError as exc:
+        # 掉线/超时/连接被重置：转成 error，让 agent_loop 走已有错误渲染，不崩进程
         return {
-            "content": message.get("content", "") or "",
-            "tool_calls": _parse_tool_calls(message),
-            "error": None,
-            # 第 2 关：把 KV Cache 命中量暴露出来，方便在 agent_loop 里观察
-            "cache_hit_tokens": usage.get("prompt_cache_hit_tokens", 0),
-            "cache_miss_tokens": usage.get("prompt_cache_miss_tokens", 0),
+            "content": "", "tool_calls": None,
+            "error": f"连接异常：{exc.__class__.__name__}（{exc}）",
+            "cache_hit_tokens": 0, "cache_miss_tokens": 0,
         }
+
+    if resp.status_code != 200:
+        return {
+            "content": "", "tool_calls": None,
+            "error": f"API {resp.status_code}: {resp.text[:300]}",
+            "cache_hit_tokens": 0, "cache_miss_tokens": 0,
+        }
+
+    data = resp.json()
+    message = data["choices"][0]["message"]
+    usage = data.get("usage", {})
+
+    return {
+        "content": message.get("content", "") or "",
+        "tool_calls": _parse_tool_calls(message),
+        "error": None,
+        # 第 2 关：把 KV Cache 命中量暴露出来，方便在 agent_loop 里观察
+        "cache_hit_tokens": usage.get("prompt_cache_hit_tokens", 0),
+        "cache_miss_tokens": usage.get("prompt_cache_miss_tokens", 0),
+    }
 
 
 def _parse_tool_calls(message: dict) -> list[dict] | None:

@@ -11,6 +11,7 @@
 
 import asyncio
 import logging
+import os
 
 from rich.console import Console
 from rich.panel import Panel
@@ -64,11 +65,17 @@ AGENT_VERBOSE = False  # /debug 切换；True 时每轮打印完整 messages 快
 async def do_chat(messages: list[dict]):
     """流式聊天：把新回复逐 token 打印成打字机效果，结束后 append 进历史。"""
     full = ""
-    async for token in chat_stream(messages):
-        console.print(token, end="", markup=False)
-        full += token
+    try:
+        async for token in chat_stream(messages):
+            console.print(token, end="", markup=False)
+            full += token
+    except Exception as e:
+        # 兜底：任何上层没接住的异常都不让主循环崩掉，打印红字继续
+        console.print(f"[red]⚠ 聊天出错：{e}[/red]")
+        return
     console.print()
-    messages.append({"role": "assistant", "content": full})
+    if full:  # 空回复（如网络错误行）不写进历史，避免污染
+        messages.append({"role": "assistant", "content": full})
 
 
 async def do_agent(messages: list[dict]):
@@ -78,28 +85,43 @@ async def do_agent(messages: list[dict]):
         *messages,
     ]
 
-    async for event in run_agent_loop(loop_messages, ALL_TOOLS, verbose=AGENT_VERBOSE):
-        et = event["type"]
-        if et == "trace":
-            _render_trace(event)
-        elif et == "tool_start":
-            console.print(
-                f"[dim]→ 调用工具 [bold]{event['name']}[/bold]"
-                f" {event['arguments']}[/dim]"
-            )
-        elif et == "tool_result":
-            # 工具结果只显示片段，避免刷屏
-            snippet = (event["result"] or "")[:200]
-            console.print(Panel(snippet, title=f"🔧 {event['name']} 结果", border_style="blue"))
-        elif et == "token":
-            console.print(event["content"], markup=False)
-        elif et == "done":
-            # 把最终回答写回长期 history（system 不重复存，其余照录）
-            messages.append({"role": "assistant", "content": event["content"] or ""})
-        elif et == "error":
-            console.print(f"[red]⚠ {event['message']}[/red]")
-        else:
-            console.print(f"[dim]{event!r}[/dim]")
+    try:
+        async for event in run_agent_loop(loop_messages, ALL_TOOLS, verbose=AGENT_VERBOSE):
+            et = event["type"]
+            if et == "trace":
+                _render_trace(event)
+            elif et == "compress":
+                before, after, merged = event["before_est"], event["after_est"], event["merged"]
+                saved = f"{100*(1-after/before):.0f}%" if before else "—"
+                console.print(
+                    Panel(
+                        f"历史 {before} tokens → 压缩后 {after} tokens（省 {before-after}，{saved}）"
+                        f" · 已合并 {merged} 条 tool 结果",
+                        title="⚡ 上下文压缩触发（第4关）",
+                        border_style="green",
+                    )
+                )
+            elif et == "tool_start":
+                console.print(
+                    f"[dim]→ 调用工具 [bold]{event['name']}[/bold]"
+                    f" {event['arguments']}[/dim]"
+                )
+            elif et == "tool_result":
+                # 工具结果只显示片段，避免刷屏
+                snippet = (event["result"] or "")[:200]
+                console.print(Panel(snippet, title=f"🔧 {event['name']} 结果", border_style="blue"))
+            elif et == "token":
+                console.print(event["content"], markup=False)
+            elif et == "done":
+                # 把最终回答写回长期 history（system 不重复存，其余照录）
+                messages.append({"role": "assistant", "content": event["content"] or ""})
+            elif et == "error":
+                console.print(f"[red]⚠ {event['message']}[/red]")
+            else:
+                console.print(f"[dim]{event!r}[/dim]")
+    except Exception as e:
+        # 兜底：网络/未知异常不能让整个交互进程退出
+        console.print(f"[red]⚠ Agent 出错：{e}[/red]")
     console.print()
 
 
@@ -196,7 +218,9 @@ async def main():
     while True:
         try:
             line = await asyncio.to_thread(input, "\n你 > ")
-        except (EOFError, KeyboardInterrupt):
+        except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
+            # Ctrl+C 在 asyncio+线程组合下会以 CancelledError 形式进来，
+            # 这里把它和 EOF(ctrl+D)、KeyboardInterrupt 一律当"用户要退出"
             console.print("\nbye")
             break
 
@@ -235,4 +259,10 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # 最外层兜底：即使有漏网的中断异常也不打一长串 Traceback，干净退出。
+        # os._exit 直接终止进程，不等那个正在阻塞于 input() 的线程，避免挂起。
+        console.print("\nbye")
+        os._exit(0)
