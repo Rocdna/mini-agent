@@ -16,7 +16,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from partical.api import chat_with_tools
+from partical.api import chat_stream_with_tools
 from partical.compressor import estimate_tokens, should_compress, compress_tool_results
 from partical.status_bar import StatusBar
 
@@ -94,12 +94,19 @@ async def run_agent_loop(
     verbose: bool = False,
     use_status_bar: bool = True,
     use_compressor: bool = True,
+    enable_memory: bool = True,
+    memory_tools: dict | None = None,
 ) -> AsyncGenerator[dict, None]:
     """执行 ReAct 循环。
 
     Args:
         use_status_bar: 第 3 关的状态栏是否注入。设 False 可做对照实验。
         use_compressor: 第 4 关的上下文压缩是否启用。设 False 可对照"不压"基线。
+        enable_memory: 第 3 章 — 记忆工具是否接入本循环。True 时把 memory_tools
+                       并进工具集，让 agent 能在回答时调用 add_memory 沉淀记忆；
+                       False 时完全不带记忆工具（对照"无记忆"基线）。
+        memory_tools:   enable_memory=True 时要并入的 {name: fn} 记忆工具字典
+                        （来自 build_memory_tools）。缺省则不额外并入。
 
     yield 事件类型：
       tool_start   {"type", "name", "arguments"}
@@ -119,6 +126,12 @@ async def run_agent_loop(
       4. 有 tool_calls → assistant 消息原样放回历史（模型要"看到"自己的决策）
          → 逐个执行工具 → 结果按 tool_call_id 追加 → 回到顶再调模型
     """
+    # 第 3 章：启用记忆时，把记忆工具并进工具集，让 agent 能在回答中沉淀记忆。
+    # 与 state_bar/compressor 的"临时注入"呼应：记忆也是一个可开关的插件。
+    if enable_memory and memory_tools:
+        # 不污染调用方传入的 dict：拷贝后合并，保留原有工具
+        tool_executors = {**tool_executors, **memory_tools}
+
     tool_schemas = _build_schemas(tool_executors)
     prev_cache = None  # 上上轮请求的 KV Cache 数字，随 trace 一起展示
     bar = StatusBar()  # 第 3 关：状态栏，用代码统计工具调用次数喂给模型
@@ -162,24 +175,36 @@ async def run_agent_loop(
                 "cache": prev_cache,  # 上轮请求的 hit/miss（这轮还没发出去）
             }
 
-        response = await chat_with_tools(msgs_to_send, tool_schemas)
-        if response["error"]:
-            yield {"type": "error", "message": response["error"]}
+        # ── 流式调用：文字逐 token 冒出来（打字机），工具调用攒齐后返回 ──
+        # 这样 ReAct 的 assistant 文本 + 最终回答都有打字机效果，记忆工具不受影响。
+        content_tokens: list[str] = []
+        tool_calls = None
+        api_error = None
+        async for ev in chat_stream_with_tools(msgs_to_send, tool_schemas):
+            if ev["type"] == "token":
+                text = ev["text"]
+                if text.startswith("\n[错误]"):    # 流式层的网络/错误提示
+                    api_error = text
+                    continue
+                content_tokens.append(text)
+                yield {"type": "token", "content": text}   # 打字机：main 逐字渲染
+            elif ev["type"] == "tool_calls":
+                tool_calls = ev["calls"]
+
+        if api_error:
+            yield {"type": "error", "message": api_error}
             return
 
-        content = response["content"]
-        tool_calls = response["tool_calls"]
+        content = "".join(content_tokens)
 
-        # 第 2 关：观察 KV Cache 命中——把数字带进下轮 trace 展示，替代看不见的 logger
+        # 第 2 关：观察 KV Cache 命中——把数字带进下轮 trace 展示（当前流式接口暂不回报，留 0）
         prev_cache = {
-            "hit": response.get("cache_hit_tokens", 0),
-            "miss": response.get("cache_miss_tokens", 0),
+            "hit": 0,
+            "miss": 0,
         }
 
-        # ── 模型不再要工具 → 这就是最终回答 → 结束 ──
+        # ── 模型不再要工具 → 这就是最终回答 → 结束（文本已打字机流出）──
         if not tool_calls:
-            if content:
-                yield {"type": "token", "content": content}
             yield {"type": "done", "content": content}
             return
 

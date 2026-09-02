@@ -71,6 +71,83 @@ async def chat_stream(messages: list[dict]):
         yield f"\n[错误] 连接异常：{exc.__class__.__name__}"
 
 
+async def chat_stream_with_tools(messages: list[dict], tools: list[dict] | None = None):
+    """流式 + 工具调用，逐 token yield。
+
+    流式协议里文本(contact)与工具调用(tool_calls)分帧到达：
+      - 文本帧：choices[0].delta.content  → 立刻 yield {"type":"token", "text":...}
+      - 工具帧：choices[0].delta.tool_calls 是分片累积的（index/function.arguments 分多帧
+        拼起来），要攒到流结束时才完整 → 结束时 yield {"type":"tool_calls", "calls":[...]}
+    DeepSeek 流式里 tool_calls 的参数是 JSON 字符串分片，必须逐帧拼接后一次 json.loads。
+
+    用法：
+        calls = None
+        async for ev in chat_stream_with_tools(messages, tools):
+            if ev["type"] == "token":   print(ev["text"], end="")
+            elif ev["type"] == "tool_calls": calls = ev["calls"]
+    """
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": messages,
+        "stream": True,
+        "temperature": 0.3,
+        "max_tokens": 4096,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+
+    # 工具调用分片累积：{"id": ...}, {"function": {...}} 每帧叠加
+    _tool_id = None
+    _tool_name = ""
+    _args_slices: list[str] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", DEEPSEEK_URL, headers=_headers(), json=payload) as resp:
+                if resp.status_code != 200:
+                    yield {"type": "token", "text": f"\n[错误] API 返回 {resp.status_code}"}
+                    return
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = data["choices"][0].get("delta", {})
+                    # ① 文本 token
+                    text = delta.get("content")
+                    if text:
+                        yield {"type": "token", "text": text}
+                    # ② 工具调用分片（可能有多个 tool_call，这里拼第一个）
+                    #    流式里 delta.tool_calls 每帧给 index + function.arguments 片段
+                    for tc in delta.get("tool_calls") or []:
+                        func = tc.get("function", {})
+                        if tc.get("id"):
+                            _tool_id = tc["id"]
+                        if func.get("name"):
+                            _tool_name = func["name"]
+                        args_part = func.get("arguments")
+                        if args_part:
+                            _args_slices.append(args_part)
+    except httpx.HTTPError as exc:
+        yield {"type": "token", "text": f"\n[错误] 连接异常：{exc.__class__.__name__}"}
+        return
+
+    # 流结束：若有工具调用，攒齐参数后 yield
+    if _tool_id is not None:
+        raw_args = "".join(_args_slices)
+        try:
+            args = json.loads(raw_args) if raw_args else {}
+        except json.JSONDecodeError:
+            args = {}
+        yield {"type": "tool_calls", "calls": [{"id": _tool_id, "name": _tool_name, "arguments": args}]}
+
+
 async def chat_with_tools(messages: list[dict], tools: list[dict] | None = None) -> dict:
     """非流式 + 工具调用（ReAct 模式用）。
 

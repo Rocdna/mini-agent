@@ -23,8 +23,19 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 from partical.api import chat_stream
 from partical.agent_loop import run_agent_loop
 from partical.tools import ALL_TOOLS
+from partical.memory.memory_manager import MemoryManager
+from partical.memory.tools import build_memory_tools
 
 console = Console()
+
+# ── 记忆系统：会话级 MemoryManager + 记忆工具(按 format 生成) ──
+# 记忆像/压缩一样是【可开关的插件】：默认开，/memory 可关。
+# 记忆工具不并入全局 ALL_TOOLS，而是在 do_agent 里按 enable_memory 传给 agent_loop，
+# 与 use_compressor 对称，方便做"有记忆 vs 无记忆"对照实验。
+MEMORY_FORMAT = "enhanced_notes"   # 当前记忆格式(决定 add_memory 的 schema 形状)
+MEMORY_USER = "default"
+ENABLE_MEMORY = True
+memory_mgr = MemoryManager(user_id=MEMORY_USER, filename_key=MEMORY_FORMAT)
 
 # ══════════════════════════════════════════════════════════════
 # System prompt — Agent 模式
@@ -62,6 +73,18 @@ AGENT_MODE = False
 AGENT_VERBOSE = False  # /debug 切换；True 时每轮打印完整 messages 快照
 
 
+def _memory_context() -> str:
+    """把当前记忆转成一段 system 注入文本，让 agent「记得」之前沉淀的用户事实。
+
+    Enhanced Notes 结构：context_string() 返回的是若干条带上下文的段落。
+    记忆为空时返回空串（不强行注入占位）。
+    """
+    ctx = memory_mgr.context_string()
+    if not ctx or ctx == "(无记忆)":
+        return ""
+    return "\n<user_memory>\n" + ctx + "\n</user_memory>\n"""
+
+
 async def do_chat(messages: list[dict]):
     """流式聊天：把新回复逐 token 打印成打字机效果，结束后 append 进历史。"""
     full = ""
@@ -79,14 +102,25 @@ async def do_chat(messages: list[dict]):
 
 
 async def do_agent(messages: list[dict]):
-    """ReAct 模式：构造 [system + 历史] → run_agent_loop → 按事件类型渲染。"""
+    """ReAct 模式：构造 [system + 历史] → run_agent_loop → 按事件类型渲染。
+
+    会做「记忆注入」：把 memory_mgr 里已有的 enhanced notes 拼进 system prompt，
+    使 agent 能看到之前沉淀的用户事实。记忆工具的调用(save)fully 走 run_agent_loop。
+    """
+    # 记忆按开关注入：ENABLE_MEMORY 关时连记忆上下文也不带（对照基线）
+    memory_part = _memory_context() if ENABLE_MEMORY else ""
+    system_content = AGENT_SYSTEM_PROMPT + memory_part
     loop_messages = [
-        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         *messages,
     ]
 
+    # 记忆工具按开关传给 agent_loop（对称 use_compressor 的可选插件）
+    mem_tools = build_memory_tools(memory_mgr, MEMORY_FORMAT) if ENABLE_MEMORY else None
+
     try:
-        async for event in run_agent_loop(loop_messages, ALL_TOOLS, verbose=AGENT_VERBOSE):
+        async for event in run_agent_loop(loop_messages, ALL_TOOLS, verbose=AGENT_VERBOSE,
+                                          enable_memory=ENABLE_MEMORY, memory_tools=mem_tools):
             et = event["type"]
             if et == "trace":
                 _render_trace(event)
@@ -102,6 +136,8 @@ async def do_agent(messages: list[dict]):
                     )
                 )
             elif et == "tool_start":
+                # 划：工具调用前先换行，避免和打字机的文本粘连
+                console.print()
                 console.print(
                     f"[dim]→ 调用工具 [bold]{event['name']}[/bold]"
                     f" {event['arguments']}[/dim]"
@@ -111,8 +147,10 @@ async def do_agent(messages: list[dict]):
                 snippet = (event["result"] or "")[:200]
                 console.print(Panel(snippet, title=f"🔧 {event['name']} 结果", border_style="blue"))
             elif et == "token":
-                console.print(event["content"], markup=False)
+                # 流式：逐字打出来(打字机)。rich 的 end="" 会即时渲染，无需手动 flush
+                console.print(event["content"], end="", markup=False)
             elif et == "done":
+                console.print()  # 回答结束，补一个换行
                 # 把最终回答写回长期 history（system 不重复存，其余照录）
                 messages.append({"role": "assistant", "content": event["content"] or ""})
             elif et == "error":
@@ -209,8 +247,8 @@ def list_tools():
 
 
 async def main():
-    """主循环：读输入 → 处理 /agent /chat /tool /debug /quit → 分发到 do_chat / do_agent。"""
-    global AGENT_MODE, AGENT_VERBOSE
+    """主循环：读输入 → 处理 /agent /chat /memory /tool /debug /quit → 分发到 do_chat / do_agent。"""
+    global AGENT_MODE, AGENT_VERBOSE, ENABLE_MEMORY
 
     console.print("[bold cyan]Code Review Agent[/bold cyan] — 输入 /chat /agent /tool /debug /quit")
     messages: list[dict] = []
@@ -244,6 +282,15 @@ async def main():
             AGENT_VERBOSE = not AGENT_VERBOSE
             state = "开" if AGENT_VERBOSE else "关"
             console.print(f"[green]/debug 已{state}：每轮打印发往模型的完整 messages 快照[/green]")
+            continue
+        if cmd == "/memory":
+            # 记忆开关：对称 /compressor，可对照"有记忆 vs 无记忆"
+            ENABLE_MEMORY = not ENABLE_MEMORY
+            state = "开" if ENABLE_MEMORY else "关"
+            console.print(
+                f"[green]/memory 已{state}：Agent 会{'注入并追加' if ENABLE_MEMORY else '不带'}用户记忆"
+                f"（格式 {MEMORY_FORMAT}，存储 {os.path.basename(memory_mgr.memory_file)}）[/green]"
+            )
             continue
         if not cmd:
             continue
