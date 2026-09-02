@@ -1,0 +1,62 @@
+[
+  {
+    "id": "q1",
+    "query": "退款多久到账？",
+    "target": "refund_policy.md",
+    "note": "关键词退款/到账字面出现，验证基本命中"
+  },
+  {
+    "id": "q2",
+    "query": "保修期是多久？",
+    "target": "after_sales_service.md",
+    "note": "关键词保修字面出现，验证基本命中"
+  },
+  {
+    "id": "q3",
+    "query": "买了不喜欢的东西能退吗？",
+    "target": "refund_policy.md",
+    "note": "字面无退款/退货，语义指向退款政策，测语义检索"
+  },
+  {
+    "id": "q4",
+    "query": "消费积分能当钱花吗？",
+    "target": "membership_benefits.md",
+    "note": "字面无积分抵扣/折扣，语义指向积分规则"
+  },
+  {
+    "id": "q5",
+    "query": "商品坏了怎么找客服？",
+    "target": "after_sales_service.md",
+    "note": "坏了近维修/售后，也可能命中退款，考验主题区分度"
+  },
+  {
+    "id": "q6",
+    "query": "收到货大概要几天？",
+    "target": "shipping_delivery.md",
+    "note": "收到货语义近配送时效，字面无配送/物流关键词精确命中"
+  },
+  {
+    "id": "q7",
+    "query": "积分抵现能抵多少，有上限吗？",
+    "target": "membership_benefits.md",
+    "note": "抵现=积分抵扣，涉及抵扣上限50%，混合语义"
+  },
+  {
+    "id": "q8",
+    "query": "能不能不开票只给个收据？",
+    "target": "invoice.md",
+    "note": "开票/发票语义，字面需映射到invoice，测发票主题召回"
+  },
+  {
+    "id": "q9",
+    "query": "最近商场有满减活动吗？",
+    "target": "coupons.md",
+    "note": "满减活动语义近优惠券，无满减券字面，测优惠券主题"
+  },
+  {
+    "id": "q10",
+    "query": "手机被偷了担心账号被盗怎么办？",
+    "target": "account_security.md",
+    "note": "账号被盗语义近账号安全/锁定/异常登录处理"
+  }
+]
