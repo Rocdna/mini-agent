@@ -6,9 +6,9 @@ compare_chunkers — 对比固定大小 vs 段落感知分块
   2. 具代表性的一篇，抽样展示两种策略的块内容差异（fixed 会拦腰切句，recursive 对齐段落）
 
 纯文本，零 API。用法：
-  python -m partical.rag.compare_chunkers
+  python -m partical.tests.compare_chunkers
   # 只看某一篇：
-  python -m partical.rag.compare_chunkers --doc refund_policy.md
+  python -m partical.tests.compare_chunkers --doc refund_policy.md
 """
 
 import argparse
@@ -20,7 +20,7 @@ try:
 except Exception:
     pass
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent / "rag"
 DATA = ROOT / "data"
 
 from partical.rag.chunker import chunk_text

@@ -26,57 +26,75 @@ from pathlib import Path
 
 from partical.rag.chunker import chunk_text
 
-_INDEX_FILE = Path(__file__).resolve().parent / "data" / "indexes" / "embeddings.json"
+_DEFAULT_CORPUS = Path(__file__).resolve().parent / "data"
+
+# 记忆化每个语料的索引文件路径，避免重复构建
+_index_providers: dict[str, tuple[Path, Path]] = {}
 
 
-def _load_docs() -> dict[str, str]:
-    """读 data/ 下所有 md，返回 {文件名: 文本}。"""
-    data = _INDEX_FILE.parent.parent
+def _resolve(corpus_root: str | Path | None) -> tuple[Path, Path]:
+    """返回 (md目录, 索引文件路径)。默认用 data/，可指定其他语料目录。"""
+    corpus = Path(corpus_root) if corpus_root else _DEFAULT_CORPUS
+    index_file = corpus / "indexes" / "embeddings.json"
+    return corpus, index_file
+
+
+def _load_docs(corpus_root: str | Path | None = None) -> dict[str, str]:
+    """读语料目录下所有 md，返回 {文件名: 文本}。默认 data/。"""
+    corpus, _ = _resolve(corpus_root)
     docs = {}
-    for f in sorted(data.glob("*.md")):
+    for f in sorted(corpus.glob("*.md")):
         docs[f.name] = f.read_text(encoding="utf-8")
     return docs
 
 
-def _chunks():
+def _chunks(corpus_root: str | Path | None = None):
     """与 eval_bm25 相同的分块方式：把全部文档切成一排 chunk。"""
     chunks = []
-    for fname, text in _load_docs().items():
+    for fname, text in _load_docs(corpus_root).items():
         chunks += chunk_text(text, method="recursive", doc=fname)
     return chunks
 
 
-def _cache_exists() -> bool:
-    return _INDEX_FILE.exists()
+def _cache_exists(corpus_root: str | Path | None = None) -> bool:
+    _, index_file = _resolve(corpus_root)
+    return index_file.exists()
 
 
-def _load_cache() -> list[dict]:
+def _load_cache(corpus_root: str | Path | None = None) -> list[dict]:
     """从缓存 JSON 读回 chunk+vector。"""
-    data = json.loads(_INDEX_FILE.read_text(encoding="utf-8"))
+    _, index_file = _resolve(corpus_root)
+    data = json.loads(index_file.read_text(encoding="utf-8"))
     return data["chunks"]
 
 
-async def build_or_load_index(auto_embed: bool = True) -> list[dict]:
+async def build_or_load_index(auto_embed: bool = True,
+                              corpus_root: str | Path | None = None) -> list[dict]:
     """核心入口：返回可用的一列 chunk（含 vector）。
 
+    Args:
+        auto_embed: 缓存缺失时是否自动嵌入。False 时返回空（只读/检查场景）。
+        corpus_root: 语料目录，默认 data/。传其他目录可独立建索引，
+                     索引文件落在 {corpus_root}/indexes/embeddings.json，互不覆盖。
+
     若缓存已存在 → 直接读缓存（不调 API）。
-    若不存在 → 嵌入全部 chunk 并写缓存（调一次方舟 API，除非 auto_embed=False）。
-    auto_embed=False 时若缓存缺失，则返回空（供只读/检查场景）。
+    若不存在 → 嵌入全部 chunk 并写缓存（调方舟 API，除非 auto_embed=False）。
 
     Returns:
         list of {"index","doc","text","vector"}
     """
     # 1) 缓存命中：直接读
-    if _cache_exists():
-        print(f"[vector_store] 命中缓存 {_INDEX_FILE.name}, 跳过嵌入")
-        return _load_cache()
+    if _cache_exists(corpus_root):
+        _, index_file = _resolve(corpus_root)
+        print(f"[vector_store] 命中缓存 {index_file.name}, 跳过嵌入")
+        return _load_cache(corpus_root)
 
     # 2) 缓存缺失：嵌入 + 落盘
     if not auto_embed:
         print("[vector_store] 缓存缺失且 auto_embed=False，返回空")
         return []
 
-    chunks = _chunks()
+    chunks = _chunks(corpus_root)
     texts = [c["text"] for c in chunks]
     print(f"[vector_store] 首次嵌入 {len(texts)} 个 chunk ...")
 
@@ -95,11 +113,12 @@ async def build_or_load_index(auto_embed: bool = True) -> list[dict]:
             "vector": v,
         })
 
-    _INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _INDEX_FILE.write_text(
+    _, index_file = _resolve(corpus_root)
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    index_file.write_text(
         json.dumps({"model": "doubao-embedding-vision", "dim": dim, "chunks": records},
                    ensure_ascii=False),
         encoding="utf-8",
     )
-    print(f"[vector_store] 已写入 {_INDEX_FILE}")
+    print(f"[vector_store] 已写入 {index_file}")
     return records

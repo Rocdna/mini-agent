@@ -17,6 +17,7 @@ hybrid_search — 混合检索（BM25 稀疏 + 稠密向量 → RRF 融合）
 """
 
 import math
+from pathlib import Path
 
 from partical.rag.embedded import embed_texts
 from partical.rag.retriever import build_index, tokenize
@@ -120,11 +121,14 @@ class HybridIndex:
         return results
 
 
-async def build() -> HybridIndex:
+async def build(corpus_root: str | Path | None = None) -> HybridIndex:
     """一次性构建混合索引：载入（或首次生成）稠密向量缓存 + 建 BM25。
 
-    稠密侧缓存命中则不调 API；miss 才嵌一遍 42 chunk（一次批量调用）。
+    Args:
+        corpus_root: 语料目录，默认 data/。传其他目录可独立建索引（如民法典）。
+
+    稠密侧缓存命中则不调 API；miss 才嵌一遍语料（一次批量嵌入）。
     """
-    chunks = await build_or_load_index()
+    chunks = await build_or_load_index(corpus_root=corpus_root)
     idx = HybridIndex(chunks)
     return idx

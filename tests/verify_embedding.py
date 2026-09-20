@@ -7,7 +7,7 @@ verify_embedding — 小范围内验证豆包 embedding API 通路 + 语义捕�
   - 语义无关的两句相似度低（如「退款到账」vs「会员积分规则」）
 
 因为要调用付费的方舟 embedding API，默认不自动跑，等你确认后执行：
-  python -m partical.rag.verify_embedding
+  python -m partical.tests.verify_embedding
 """
 
 import asyncio

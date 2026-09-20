@@ -6,7 +6,7 @@ eval_hybrid — 混合检索（RRF）评估，与 eval_bm25.py / dense_search.py
   - q3/q4（语义 miss）：纯 BM25 打错，靠稠密补
   - q6（精确词偏）：纯稠密 top-1 偏到 refund，靠 BM25 补
 
-用法： python -m partical.rag.eval_hybrid
+用法： python -m partical.tests.eval_hybrid
        （稠密缓存命中则只调 1 次 embed 10 条 query）
 """
 
@@ -20,7 +20,7 @@ try:
 except Exception:
     pass
 
-DATA = Path(__file__).resolve().parent / "data"
+DATA = Path(__file__).resolve().parent.parent / "rag" / "data"
 
 
 async def main():

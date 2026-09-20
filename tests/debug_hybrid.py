@@ -4,7 +4,7 @@ debug_hybrid — 诊断混合检索：把 BM25 名次、稠密名次、RRF 融�
 用来回答"为什么混合比单边还差"：是稠密把错文档排高了，还是 BM25 污染拖累融合。
 对每个问题 query 打印每篇文档在两侧的名次与融合分，一眼看清 top-1 是谁定的。
 
-用法： python -m partical.rag.debug_hybrid
+用法： python -m partical.tests.debug_hybrid
        （会 embed 一次 list of queries）
 """
 

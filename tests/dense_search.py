@@ -10,7 +10,7 @@ dense_search — 纯稠密检索 + 评估（与 eval_bm25.py 镜像对比）
 对比意义：稠密检索捕捉语义（q3/q4 这类 BM25 抓瞎的查询该命中），
 但精确专名/字面查询可能被语义稀释。和 eval_bm25.py 的输出并列看。
 
-用法： python -m partical.rag.dense_search
+用法： python -m partical.tests.dense_search
        （首次跑会嵌入 42 chunk + 10 query，共调约 2 次 API）
 """
 
@@ -25,7 +25,7 @@ try:
 except Exception:
     pass
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent / "rag"
 DATA = ROOT / "data"
 
 

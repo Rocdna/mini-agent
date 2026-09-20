@@ -90,7 +90,7 @@ async def _execute_one_tool(name: str, args: dict, tool_executors: dict) -> str:
 async def run_agent_loop(
     messages: list[dict],
     tool_executors: dict,
-    max_turns: int = 5,
+    max_turns: int = 12,
     verbose: bool = False,
     use_status_bar: bool = True,
     use_compressor: bool = True,

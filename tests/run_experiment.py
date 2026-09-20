@@ -13,9 +13,9 @@ run_experiment — 方案B：实验脚本。跑 book 评估集，用 LLM 提炼�
     按单段对话喂最稳，也符合"一段对话提炼一批记忆"的自然粒度。
 
 用法：
-  python -m partical.memory.run_experiment --layer layer1 --case layer1_01 --conv 0 --format simple_notes
+  python -m partical.tests.run_experiment --layer layer1 --case layer1_01 --conv 0 --format simple_notes
   # --dry 只打印将送入 LLM 的消息，不调 API（先审查，再放行）
-  python -m partical.memory.run_experiment --layer layer1 --case layer1_01 --format simple_notes --dry
+  python -m partical.tests.run_experiment --layer layer1 --case layer1_01 --format simple_notes --dry
 """
 
 import argparse
@@ -168,8 +168,8 @@ async def run(case: dict, conv_idx: int, format_name: str, dry: bool):
 # ═══════════════════════════════════════════════════════════
 # ▶ 想改实验目标,只动下面这几行,然后直接 python run_experiment.py
 # ═══════════════════════════════════════════════════════════
-RUN_LAYER  = "layer2"          # layer1 / layer2 / layer3
-RUN_CASE   = "layer2_01"       # 测哪个 case?见下面 CASE_ID 列表
+RUN_LAYER  = "layer1"          # layer1 / layer2 / layer3
+RUN_CASE   = "layer1_01"       # 测哪个 case?见下面 CASE_ID 列表
 RUN_CONV   = 0                 # 用这个 case 的第几段对话(0 起)
 RUN_FORMAT = "json_cards"    # simple_notes / enhanced_notes / json_cards / advanced_json_cards
 # ═══════════════════════════════════════════════════════════

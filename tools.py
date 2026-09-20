@@ -214,8 +214,15 @@ _get_current_temperature.__tool_schema__ = {
 
 
 # ── 注册表 ──────────────────────────────────────────────
+from partical.rag.rag_answer import search_knowledge as _search_knowledge
+
 ALL_TOOLS = {
     "web_search": _web_search,
     "get_current_time": _get_current_time,
     "get_current_temperature": _get_current_temperature,
+    # RAG 知识库工具（《民法典》）：定义在 rag_answer.py，schema 自带 description
+    # （"用户问法律条文/条款/规则/权利义务时调用"），触发条件由模型按它判断。
+    # 注意：真正的 async search_knowledge 首调用才 build 索引/读缓存，
+    #       所以 import 阶段不会触发构建，需联网时才懒加载。
+    "search_knowledge": _search_knowledge,
 }

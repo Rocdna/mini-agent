@@ -11,7 +11,7 @@ eval_metrics — 用 recall@3 和 MRR 三列对比 BM25 / 稠密 / 混合(同一
   MRR       : 对的排第几？越靠前分越高（排够靠前吗）
   nDCG      : 排序整体多好？（需分级相关度，当前 query 只有对/错，不适用，跳过）
 
-用法： python -m partical.rag.eval_metrics
+用法： python -m partical.tests.eval_metrics
        （稠密缓存命中则只嵌 1 次 10 条 query）
 """
 
@@ -26,7 +26,7 @@ try:
 except Exception:
     pass
 
-DATA = Path(__file__).resolve().parent / "data"
+DATA = Path(__file__).resolve().parent.parent / "rag" / "data"
 
 
 def cosine(a: list[float], b: list[float]) -> float:

@@ -13,6 +13,7 @@ embedded — 稠密嵌入（第 3 章实验 3-4 / 3-6 的稠密腿）
 配置读取 .env（load_dotenv）。此模块负责"调 API 拿向量"，是否建索引 / 查询在外部组织。
 """
 
+import asyncio
 import os
 
 import httpx
@@ -32,6 +33,54 @@ def _headers() -> dict:
     }
 
 
+# 预乘基址（可当 0.5s 起步），429/5xx 网络错误时指数退避
+_RETRY_BASE = 0.5
+
+# 429(限流)/500/502/503(服务端瞬时) 值得等重试；4xx 业务错(如 400)不该死循环
+_RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+async def _post_with_retry(client: httpx.AsyncClient,
+                           url: str,
+                           payload: dict,
+                           max_retries: int) -> httpx.Response | None:
+    """POST 一次，429/5xx/网络错误按 Retry-After 或指数退避重试 max_retries 次。
+
+    Returns:
+        成功响应；重试耗尽返回 None 让调用方决定怎么抛。
+
+    退避策略：若响应带 Retry-After 头优先用它；否则 2^n * 基址 指数增长。
+    只对"瞬时可恢复"的状态码重试，彻底的业务错误（4xx 非 408/429）直接抛出。
+    """
+    attempt = 0
+    while True:
+        try:
+            resp = await client.post(url, headers=_headers(), json=payload)
+        except httpx.HTTPError:
+            if attempt >= max_retries:
+                return None
+            attempt += 1
+            await asyncio.sleep(_RETRY_BASE * (2 ** attempt))
+            continue
+
+        if resp.status_code == 200:
+            return resp
+
+        # 非 200：区分"可重试"和"业务错"
+        if resp.status_code not in _RETRYABLE_STATUS:
+            raise RuntimeError(f"Embedding API {resp.status_code}: {resp.text[:300]}")
+
+        if attempt >= max_retries:
+            return None
+
+        # 计算等待时长：优先响应头的 Retry-After（秒），否则指数退避
+        ra = resp.headers.get("Retry-After")
+        wait = float(ra) if ra and ra.replace(".", "", 1).isdigit() \
+            else _RETRY_BASE * (2 ** attempt)
+        attempt += 1
+        await asyncio.sleep(wait)
+
+
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     """把一批文本转成向量，返回与输入等长的 list[list[float]]。
 
@@ -44,6 +93,8 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
         调用方需自行对齐（通常传非空文本）。
 
     网络/API 异常抛出 httpx.HTTPError，由上层兜底，不在这里吞。
+    对 429（限流）/5xx/网络抖动做指数退避重试——批量建索引几十上百批连发
+    很容易触发账号级限流（如 AccountRateLimitExceeded），自动等再试而不是全挂。
     """
     if not texts:
         return []
@@ -51,6 +102,8 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     # 火山方舟一次最多接受 BATCH_SIZE 条 input，超出要分批调用再拼接。
     # 放这里做批次切分，调用方（存向量 / 查询）不用自己关心上限。
     BATCH_SIZE = 10
+    RETRY_MAX = 6
+    total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
     url = f"{ARK_BASE_URL}/embeddings"
     futures: list[list[float]] = []
 
@@ -59,14 +112,17 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             batch = texts[i : i + BATCH_SIZE]
             payload = {"model": MODEL, "input": batch}
 
-            resp = await client.post(url, headers=_headers(), json=payload)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Embedding API {resp.status_code}: {resp.text[:300]}")
+            resp = await _post_with_retry(client, url, payload, RETRY_MAX)
+            if resp is None:
+                raise RuntimeError(f"Embedding API 重试 {RETRY_MAX} 次仍失败，放弃。")
 
             data = resp.json()["data"]
             # 按 index 排序，保证本批返回顺序与输入一致（方舟可能乱序）
             data.sort(key=lambda d: d["index"])
             futures += [d["embedding"] for d in data]
+
+            n = i // BATCH_SIZE + 1
+            print(f"[embed] batch {n}/{total_batches} 完成", flush=True)  # 逐批刷新,批量嵌入时可见进度
 
     # 首次调用后缓存真实维度，供 embedding_dim() 查询
     global _cached_dim
