@@ -215,6 +215,7 @@ _get_current_temperature.__tool_schema__ = {
 
 # ── 注册表 ──────────────────────────────────────────────
 from partical.rag.rag_answer import search_knowledge as _search_knowledge
+from partical.code import grep_files, glob_files, read_file, execute_code
 
 ALL_TOOLS = {
     "web_search": _web_search,
@@ -225,4 +226,9 @@ ALL_TOOLS = {
     # 注意：真正的 async search_knowledge 首调用才 build 索引/读缓存，
     #       所以 import 阶段不会触发构建，需联网时才懒加载。
     "search_knowledge": _search_knowledge,
+    # 代码/文件系统工具（partical.code 子包）：让 agent 能"自己在项目里搜代码/读代码/执行代码"
+    "grep_files": grep_files,
+    "glob_files": glob_files,
+    "read_file": read_file,
+    "execute_code": execute_code,
 }

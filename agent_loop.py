@@ -69,6 +69,34 @@ def _tool_result_msg(tool_call_id: str, result: str) -> dict:
     }
 
 
+# 空参暖机柔推：常见工具的"正确用法"示范，供重复空转提醒时引用
+_NUDGE_EXAMPLES = {
+    "grep_files": "grep_files(pattern='关键词', path='partical', file_pattern='*.py')",
+    "glob_files": "glob_files(path='partical', file_pattern='**/*.py')",
+    "read_file": "read_file(file_path='partical/main.py')",
+    "execute_code": "execute_code(code='print(1+1)', lang='python', timeout=10)",
+    "web_search": "web_search(query='关键词')",
+}
+
+
+def _nudge_msg(name: str) -> dict:
+    """构造一条温和纠正的 system 消息：同工具·同参数连续空转时注入，指引落参。
+
+    注意：这是【柔和助推】，不是硬终止——DeepSeek 这类模型往往先发空壳 {} 试探
+    工具，空报错只会让它原地重试同一个 {}，但硬终止又会误杀 turn 5 那种最终带正
+    成功运行。折中：识别"同一工具·相同参数"连续 ≥2 次，注入一句带正确用法的
+    system 纠正，让它下一轮能落正参数。
+    """
+    example = _NUDGE_EXAMPLES.get(name, f"{name}(<完整 required 参数>)")
+    return {
+        "role": "system",
+        "content": (
+            f"[harness 提示] 同一工具「{name}」已连续带相同(或空)参数调用 2 次而没有进展。"
+            f"一个工具调用必须填满 required 参数才有意义，请参考正确用法重试：{example}"
+        ),
+    }
+
+
 async def _execute_one_tool(name: str, args: dict, tool_executors: dict) -> str:
     """执行单个工具调用，返回结果字符串。
 
@@ -96,6 +124,7 @@ async def run_agent_loop(
     use_compressor: bool = True,
     enable_memory: bool = True,
     memory_tools: dict | None = None,
+    use_empty_arg_nudge: bool = True,
 ) -> AsyncGenerator[dict, None]:
     """执行 ReAct 循环。
 
@@ -138,6 +167,11 @@ async def run_agent_loop(
 
     # 第 4 关：用户的原始问题作为压缩的"任务意图"（摘要按它留什么）
     task = next((m.get("content") or "" for m in messages if m.get("role") == "user"), "")
+
+    # 第 4.5 关(空参暖机柔推，可开关)：识别"同一工具·相同参数"连续重复空转，
+    # 到第 2 次时注入温和纠正（见正文 while 里的 use_empty_arg_nudge 分支）。
+    # dup_counter: (name, args_json) -> 连续出现次数；某轮没再出现的键会清零。
+    dup_counter: dict[tuple[str, str], int] = {}
 
     for turn in range(1, max_turns + 1):
         logger.info(f"── Agent 轮次 {turn}/{max_turns} ──")
@@ -220,6 +254,25 @@ async def run_agent_loop(
 
             yield {"type": "tool_result", "name": call["name"], "result": result}
             messages.append(_tool_result_msg(call["id"], result))
+
+        # ── 空参暖机柔推：同工具·同参数连续 ≥2 次 → 每轮注入一次温和纠正 ──
+        # 软推不硬杀：同 grant 里 use_empty_arg_nudge 注释，避免误杀"先试后正"的运行。
+        # 该 system 消息会随下轮请求进模型上下文，指引它把 required 参数填正。
+        if use_empty_arg_nudge:
+            seen_this_turn: set[tuple[str, str]] = set()
+            guided = False
+            for call in tool_calls:
+                key = (
+                    call["name"],
+                    json.dumps(call.get("arguments") or {}, sort_keys=True, ensure_ascii=False),
+                )
+                seen_this_turn.add(key)
+                dup_counter[key] = dup_counter.get(key, 0) + 1
+                if dup_counter[key] >= 2 and not guided:
+                    messages.append(_nudge_msg(call["name"]))
+                    guided = True
+            # 本轮没再出现的键清零，避免把上一任务的巧合带进新任务误判
+            dup_counter = {k: v for k, v in dup_counter.items() if k in seen_this_turn}
 
         # 回到循环顶：带上更新后的完整历史再调模型，让模型自己决定是否继续
 
