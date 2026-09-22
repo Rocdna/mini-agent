@@ -10,11 +10,13 @@
 """
 
 import asyncio
+import json
 import logging
 import os
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm
 
 # 让 agent_loop 里的 logger.info（轮次、cache 等）真正可见。
 # 默认日志级别是 WARNING，INFO 会被吞——配成 INFO 才看得到"Agent 轮次 N/M"。
@@ -84,6 +86,23 @@ AGENT_MODE = False
 AGENT_VERBOSE = False  # /debug 切换；True 时每轮打印完整 messages 快照
 
 
+async def _tool_approver(name: str, arguments: dict) -> bool:
+    """审批门：给需批准的工具（如真实工作区的 bash）在终端弹 y/n。
+
+    默认拒绝(False)：只有明确输入 y 才放行。纯 UI 层，agent_loop 只在工具打上
+    __requires_approval__ 时才会来调它。
+    """
+    # 命令可能含特殊字符/换行，截断展示不刷屏
+    preview = json.dumps(arguments, ensure_ascii=False)[:140]
+    console.print()
+    # Confirm.ask 是阻塞的；包进 to_thread 不卡住 ReAct 事件循环
+    return await asyncio.to_thread(
+        Confirm.ask,
+        f"[yellow]⚠ 批准调用 [bold]{name}[/bold] {preview} ?[/yellow]",
+        default=False,
+    )
+
+
 def _memory_context() -> str:
     """把当前记忆转成一段 system 注入文本，让 agent「记得」之前沉淀的用户事实。
 
@@ -131,7 +150,8 @@ async def do_agent(messages: list[dict]):
 
     try:
         async for event in run_agent_loop(loop_messages, ALL_TOOLS, verbose=AGENT_VERBOSE,
-                                          enable_memory=ENABLE_MEMORY, memory_tools=mem_tools):
+                                          enable_memory=ENABLE_MEMORY, memory_tools=mem_tools,
+                                          tool_approver=_tool_approver):
             et = event["type"]
             if et == "trace":
                 _render_trace(event)

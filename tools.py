@@ -133,7 +133,6 @@ async def _get_current_temperature(args: dict) -> str:
         return "错误：请提供 location 参数。"
 
     try:
-        import json
         import httpx
 
         async with httpx.AsyncClient(timeout=8.0) as client:
@@ -213,9 +212,74 @@ _get_current_temperature.__tool_schema__ = {
 }
 
 
+# ── 真实工作区的通用 shell（bash）工具 ──────────────────────────────
+# 与 execute_code 的【隔离沙箱】不同：这个 bash 跑在真实工作区里，能真读改写文件/
+# 跑组合命令，因此打上 __requires_approval__ —— agent_loop 每次执行前会先向用户审批。
+# 工作区路径统一由 code.workspace 解析（默认 _coding_workspace，可用 CODING_WORKSPACE 改指），
+# 与 write_file / edit_file 共用同一落点，避免各工具各存一份路径定义。
+import os as _os
+
+from partical.code.workspace import workspace_path
+
+
+async def _bash(args: dict) -> str:
+    """在【真实工作区】执行一条 shell 命令（需用户审批）。
+
+    走 execute_code 的 shell 路径，但用 workdir 绑定到 workspace_path()——能真正
+    改到目标目录的文件。__requires_approval__ 让 agent_loop 在跑前先弹审批门。
+    """
+    code = args.get("code", "")
+    timeout = float(args.get("timeout", 15))
+    if not code:
+        return "错误：请提供 code 参数。"
+
+    ws = workspace_path()
+    try:
+        _os.makedirs(ws, exist_ok=True)
+    except OSError as e:
+        return f"错误：无法创建/访问工作区「{ws}」—— {e}"
+
+    return await execute_code({
+        "code": code,
+        "lang": "shell",
+        "timeout": timeout,
+        "workdir": ws,
+    })
+
+
+_bash.__tool_schema__ = {
+    "type": "function",
+    "function": {
+        "name": "bash",
+        "description": (
+            "在【真实工作区】里执行一条 shell 命令，返回 stdout/stderr 和退出码。\n"
+            "与 execute_code（只读隔离沙箱、碰不到你项目）不同：本工具能真正读写/修改"
+            "目标目录的文件、跑 find/rg/sed/git 等组合命令；因此每次执行前都会征求你的批准。\n"
+            "Use when: 需要真正对目标目录做写操作/改文件、跑一条能串多个小命令的 shell，"
+            "或 execute_code 的隔离沙箱够不着文件系统时。"
+            "Don't use when: 只想只读查看文件内容(用 read_file)、只想定位文本(用 grep_files)、"
+            "或只需隔离验证一段代码能不能跑(用 execute_code——它免审批)。\n"
+            "Example: code='ls -la'、code='mkdir -p logs && echo hi > logs/a.txt' 在绑定的工作区里执行。\n"
+            "常见错误: 每条命令执行前都会弹出 y/n 确认，输入 y 才真正执行、n 拒绝；"
+            "工作区默认 _coding_workspace（可用环境变量 CODING_WORKSPACE 改指），"
+            "不要假设它在项目根——先 pwd 看清位置再动手删除类操作。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "要执行的 shell 命令"},
+                "timeout": {"type": "number", "description": "超时秒数，默认 15"},
+            },
+            "required": ["code"],
+        },
+    },
+}
+_bash.__requires_approval__ = True
+
+
 # ── 注册表 ──────────────────────────────────────────────
 from partical.rag.rag_answer import search_knowledge as _search_knowledge
-from partical.code import grep_files, glob_files, read_file, execute_code
+from partical.code import grep_files, glob_files, read_file, write_file, edit_file, execute_code
 
 ALL_TOOLS = {
     "web_search": _web_search,
@@ -230,5 +294,8 @@ ALL_TOOLS = {
     "grep_files": grep_files,
     "glob_files": glob_files,
     "read_file": read_file,
+    "write_file": write_file,  # 工作区内新建/覆盖文件，__requires_approval__
+    "edit_file": edit_file,    # 工作区内精确片段替换，__requires_approval__
     "execute_code": execute_code,
+    "bash": _bash,  # 真实工作区 shell，__requires_approval__ → agent_loop 每次先审批
 }

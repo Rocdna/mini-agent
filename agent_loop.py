@@ -14,7 +14,7 @@ max_turns 兜底，防止模型无限调工具。
 import copy
 import json
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable, Optional
 
 from partical.api import chat_stream_with_tools
 from partical.compressor import estimate_tokens, should_compress, compress_tool_results
@@ -125,6 +125,7 @@ async def run_agent_loop(
     enable_memory: bool = True,
     memory_tools: dict | None = None,
     use_empty_arg_nudge: bool = True,
+    tool_approver: Optional[Callable[[str, dict], Awaitable[bool]]] = None,
 ) -> AsyncGenerator[dict, None]:
     """执行 ReAct 循环。
 
@@ -136,6 +137,10 @@ async def run_agent_loop(
                        False 时完全不带记忆工具（对照"无记忆"基线）。
         memory_tools:   enable_memory=True 时要并入的 {name: fn} 记忆工具字典
                         （来自 build_memory_tools）。缺省则不额外并入。
+        tool_approver:  审批门。给"需人工批准"的工具（打上 __requires_approval__，
+                        如真实工作区的 bash）用：执行前 await tool_approver(name, args)，
+                        返回 True 才跑、False 则跳过并把"用户拒绝"作为工具结果喂回，
+                        让 ReAct 循环继续而不是崩掉。None 时不做审批（全自动）。
 
     yield 事件类型：
       tool_start   {"type", "name", "arguments"}
@@ -249,6 +254,23 @@ async def run_agent_loop(
             bar.on_tool_call(call["name"])  # 第 3 关：执行前记一次，供下一轮状态栏显示
 
             yield {"type": "tool_start", "name": call["name"], "arguments": call["arguments"]}
+
+            # ── 审批门：对打上 __requires_approval__ 的工具（如真实工作区的 bash），
+            #    执行前先征求用户批准。拒绝不当报错崩掉，而是喂回"用户拒绝"结果。
+            executor = tool_executors.get(call["name"])
+            if tool_approver is not None and executor is not None and getattr(
+                executor, "__requires_approval__", False
+            ):
+                approved = await tool_approver(call["name"], call["arguments"])
+                if not approved:
+                    denied = (
+                        "❌ 用户拒绝了此工具调用，【未执行】。因此这条命令没有任何副作用。"
+                        "请换一种不修改文件/不跑 shell 的思路重试，"
+                        "或向用户说明你想执行什么、以及为什么需要，再去请求批准。"
+                    )
+                    yield {"type": "tool_result", "name": call["name"], "result": denied}
+                    messages.append(_tool_result_msg(call["id"], denied))
+                    continue
 
             result = await _execute_one_tool(call["name"], call["arguments"], tool_executors)
 
