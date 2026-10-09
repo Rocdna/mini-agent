@@ -219,7 +219,7 @@ _get_current_temperature.__tool_schema__ = {
 # 与 write_file / edit_file 共用同一落点，避免各工具各存一份路径定义。
 import os as _os
 
-from partical.code.workspace import workspace_path
+from code.workspace import workspace_path
 
 
 async def _bash(args: dict) -> str:
@@ -278,8 +278,8 @@ _bash.__requires_approval__ = True
 
 
 # ── 注册表 ──────────────────────────────────────────────
-from partical.rag.rag_answer import search_knowledge as _search_knowledge
-from partical.code import grep_files, glob_files, read_file, write_file, edit_file, execute_code
+from rag.rag_answer import search_knowledge as _search_knowledge
+from code import grep_files, glob_files, read_file, write_file, edit_file, execute_code
 
 ALL_TOOLS = {
     "web_search": _web_search,
@@ -290,7 +290,7 @@ ALL_TOOLS = {
     # 注意：真正的 async search_knowledge 首调用才 build 索引/读缓存，
     #       所以 import 阶段不会触发构建，需联网时才懒加载。
     "search_knowledge": _search_knowledge,
-    # 代码/文件系统工具（partical.code 子包）：让 agent 能"自己在项目里搜代码/读代码/执行代码"
+    # 代码/文件系统工具（code 子包）：让 agent 能"自己在项目里搜代码/读代码/执行代码"
     "grep_files": grep_files,
     "glob_files": glob_files,
     "read_file": read_file,

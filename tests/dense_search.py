@@ -10,7 +10,7 @@ dense_search — 纯稠密检索 + 评估（与 eval_bm25.py 镜像对比）
 对比意义：稠密检索捕捉语义（q3/q4 这类 BM25 抓瞎的查询该命中），
 但精确专名/字面查询可能被语义稀释。和 eval_bm25.py 的输出并列看。
 
-用法： python -m partical.tests.dense_search
+用法： python -m tests.dense_search
        （首次跑会嵌入 42 chunk + 10 query，共调约 2 次 API）
 """
 
@@ -38,8 +38,8 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 async def main():
-    from partical.rag.vector_store import build_or_load_index
-    from partical.rag.embedded import embed_texts
+    from rag.vector_store import build_or_load_index
+    from rag.embedded import embed_texts
 
     top_k = 3
     chunks = await build_or_load_index()

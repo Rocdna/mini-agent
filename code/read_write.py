@@ -9,7 +9,7 @@ edit_file  —— 在【有界工作区】已有文件里做精确片段替换�
 
 import os
 
-from partical.code.workspace import workspace_path, resolve_within_workspace
+from code.workspace import workspace_path, resolve_within_workspace
 
 # 读取时单次返回的最大字符数；超长文件截断，防止占爆上下文
 _MAX_READ_CHARS = 6000
@@ -67,7 +67,7 @@ read_file.__tool_schema__ = {
             "Use when: 需要看某个文件到底写了什么——完整逻辑、某个函数/定义的上下文。"
             "配 grep_files 用：grep 定位『在哪几行』，read_file 看清『那几行前后是什么』。"
             "Don't use when: 只想搜某段文本在哪(那用 grep_files)、或文件很大只要片段。\n"
-            "Example: file_path='partical/main.py'。\n"
+            "Example: file_path='main.py'。\n"
             "常见错误: 路径要是文件而不是目录；给出相对项目根或绝对路径均可。"
         ),
         "parameters": {

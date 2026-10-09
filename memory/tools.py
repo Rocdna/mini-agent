@@ -2,7 +2,7 @@
 tools — 记忆动作工具(add/update/delete),供 LLM 调用,纯代码执行
 
 对齐 book:LLM 分析对话 → 调用这几个工具 → memory_manager 落地。
-工具是普通函数 + __tool_schema__(同 partical.tools 风格)。
+工具是普通函数 + __tool_schema__(同 tools 风格)。
 
 关键设计:工具的 schema 跟着【记忆格式】走(build_memory_tools 的 format_name 决定)。
   因为不同格式给 LLM 暴露的字段不同——

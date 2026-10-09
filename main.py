@@ -1,5 +1,5 @@
 """
-终端交互入口 — 运行方式：在仓库根目录执行  python -m partical.main
+终端交互入口 — 运行方式：在仓库根目录执行  python main.py
 
 命令：
   /agent   切换到 Agent 模式（ReAct + 工具调用）
@@ -22,11 +22,11 @@ from rich.prompt import Confirm
 # 默认日志级别是 WARNING，INFO 会被吞——配成 INFO 才看得到"Agent 轮次 N/M"。
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 
-from partical.api import chat_stream
-from partical.agent_loop import run_agent_loop
-from partical.tools import ALL_TOOLS
-from partical.memory.memory_manager import MemoryManager
-from partical.memory.tools import build_memory_tools
+from api import chat_stream
+from agent_loop import run_agent_loop
+from tools import ALL_TOOLS
+from memory.memory_manager import MemoryManager
+from memory.tools import build_memory_tools
 
 console = Console()
 
@@ -257,7 +257,7 @@ def _render_trace(event: dict):
 
 def list_tools():
     """打印 ALL_TOOLS 里注册的所有工具：名称 + 是否联网 + 描述。"""
-    from partical.tools import ALL_TOOLS
+    from tools import ALL_TOOLS
 
     if not ALL_TOOLS:
         console.print("[yellow]（当前没有注册任何工具）[/yellow]")

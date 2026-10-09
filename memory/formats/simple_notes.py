@@ -16,8 +16,8 @@ Simple Notes — 记忆格式一：每条一个最小事实（book 第95行）
 
 import re
 
-from partical.api import chat_with_tools
-from partical.memory.base import MemoryFormat
+from api import chat_with_tools
+from memory.base import MemoryFormat
 
 # 提炼最小事实的指令模板
 PROMPT = """下面是用户与客服的对话历史。请把它提炼成若干条【不可再分的】最小事实（Simple Notes）。

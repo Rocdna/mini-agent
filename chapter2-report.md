@@ -44,7 +44,7 @@
 
 6. **本地服务接入**：Ollama 用 `ollama.Client()`（:11434）或 OpenAI 兼容 `/v1` 端点；vLLM 用 `server.py` 拉起 `python -m vllm.entrypoints.openai.api_server`，工具调用必须带 `--enable-auto-tool-choice --tool-call-parser hermes`。
 
-> 💡 你的 `partical/agent.py` 正好是这一步的"手动版"：只定义了 `get_current_time` / `get_weather` 两个工具的 schema，还没有工具执行与循环。把它补成 `while` 循环 + `execute_tool` 就是 2-1 的迷你版。
+> 💡 你的 `agent.py` 正好是这一步的"手动版"：只定义了 `get_current_time` / `get_weather` 两个工具的 schema，还没有工具执行与循环。把它补成 `while` 循环 + `execute_tool` 就是 2-1 的迷你版。
 
 ---
 
@@ -207,9 +207,9 @@
 
 ## 9. 学习路径建议（按你的进度）
 
-你现在在 `partical/` 手动复现工具定义（`agent.py`），建议按这条线推进：
+你现在在仓库根目录手动复现工具定义（`agent.py`），建议按这条线推进：
 
-1. **先跑通 2-1**（本地 Ollama 或任选 API）：把 `partical/agent.py` 补成完整 ReAct 循环——加 `while`、加 `execute_tool`、加结果回灌。**这比看代码重要，动手写一遍才懂**。
+1. **先跑通 2-1**（本地 Ollama 或任选 API）：把 `agent.py` 补成完整 ReAct 循环——加 `while`、加 `execute_tool`、加结果回灌。**这比看代码重要，动手写一遍才懂**。
 2. **再看 2-3**（KV Cache）：理解"为什么固定前缀放前面"是工程铁律。
 3. **然后 2-5**（注入防御）：理解"运行时校验是底线"——Agent 安全的第一课。
 4. **最后 2-10**（压缩）和 **2-6**（Skills）：理解"上下文管理"的大图景。

@@ -2,8 +2,8 @@
 自测脚本 — 验证 ReAct 循环调用的四种典型路径。
 
 用法（在仓库根目录）:
-    python -m partical.selftest [全部]
-    python -m partical.selftest 2     # 只跑第 2 条
+    python -m selftest [全部]
+    python -m selftest 2     # 只跑第 2 条
 
 每条都会打印事件轨迹 + 统计，用来判断循环是否按预期工作。
 """
@@ -11,8 +11,8 @@
 import asyncio
 import sys
 
-from partical.agent_loop import run_agent_loop
-from partical.tools import ALL_TOOLS
+from agent_loop import run_agent_loop
+from tools import ALL_TOOLS
 
 SYSTEM = "你是助手，需要实时/外部信息就调用工具，需要本地时钟就调 get_current_time，NEVER 编造。"
 

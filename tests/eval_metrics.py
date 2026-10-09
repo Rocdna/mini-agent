@@ -11,7 +11,7 @@ eval_metrics — 用 recall@3 和 MRR 三列对比 BM25 / 稠密 / 混合(同一
   MRR       : 对的排第几？越靠前分越高（排够靠前吗）
   nDCG      : 排序整体多好？（需分级相关度，当前 query 只有对/错，不适用，跳过）
 
-用法： python -m partical.tests.eval_metrics
+用法： python -m tests.eval_metrics
        （稠密缓存命中则只嵌 1 次 10 条 query）
 """
 
@@ -50,16 +50,16 @@ def mrr(top_docs: list[str], target: str) -> float:
 
 
 async def main():
-    from partical.rag.embedded import embed_texts
-    from partical.rag.retriever import build_index
-    from partical.rag.vector_store import build_or_load_index
+    from rag.embedded import embed_texts
+    from rag.retriever import build_index
+    from rag.vector_store import build_or_load_index
 
     top_k = 3
     queries = json.loads((DATA / "test_queries.json").read_text(encoding="utf-8"))
     query_texts = [q["query"] for q in queries]
 
     # 同一批 chunk（稠密缓存命中的那份），只建/载一次
-    from partical.rag.hybrid_search import _normalize
+    from rag.hybrid_search import _normalize
     raw = await build_or_load_index()
     chunks = [_normalize(c) for c in raw]   # 统一成嵌套 meta 结构，三处一致取 doc
     bm25 = build_index(chunks)
@@ -85,7 +85,7 @@ async def main():
         # 3) 混合：RRF 融合两份名次取 top_k
         bm_rank_map = {r["index"]: rank for rank, r in enumerate(bm_rank, 1)}
         den_rank_map = {pos: rank for rank, pos in enumerate(dense_order, 1)}
-        from partical.rag.rrf import rrf
+        from rag.rrf import rrf
         fused = [idx for idx, _score in rrf([bm_rank_map, den_rank_map])[:top_k]]
         hyp_top = [chunks[idx]["meta"]["doc"] for idx in fused]
 

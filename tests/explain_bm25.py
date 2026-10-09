@@ -2,7 +2,7 @@
 explain_bm25 — 诊断脚本：把查询在某篇文档上的 BM25 打分逐词拆开，看分从哪来。
 
 用法：
-  python -m partical.tests.explain_bm25 "买了不喜欢的东西能退吗"
+  python -m tests.explain_bm25 "买了不喜欢的东西能退吗"
   # 默认分析 q3，可指定不同查询和对比的两篇文档
 
 目的：亲眼看到稀疏检索的"死穴"——查询词没在目标文档里出现时，贡献从何而来。
@@ -16,8 +16,8 @@ try:
 except Exception:
     pass
 
-from partical.rag.chunker import chunk_text
-from partical.rag.retriever import build_index, tokenize
+from rag.chunker import chunk_text
+from rag.retriever import build_index, tokenize
 
 
 def _chunks():

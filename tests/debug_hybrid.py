@@ -4,7 +4,7 @@ debug_hybrid — 诊断混合检索：把 BM25 名次、稠密名次、RRF 融�
 用来回答"为什么混合比单边还差"：是稠密把错文档排高了，还是 BM25 污染拖累融合。
 对每个问题 query 打印每篇文档在两侧的名次与融合分，一眼看清 top-1 是谁定的。
 
-用法： python -m partical.tests.debug_hybrid
+用法： python -m tests.debug_hybrid
        （会 embed 一次 list of queries）
 """
 
@@ -26,14 +26,14 @@ PROBLEM_QUERIES = [
 
 
 async def main():
-    from partical.rag.hybrid_search import build, cosine
+    from rag.hybrid_search import build, cosine
 
     hybrid = await build()
     n = len(hybrid.chunks)
 
     print(f"共 {n} 个 chunk\n")
     for q in PROBLEM_QUERIES:
-        qvec = (await __import__("partical.rag.embedded", fromlist=["embed_texts"]).embed_texts([q]))[0]
+        qvec = (await __import__("rag.embedded", fromlist=["embed_texts"]).embed_texts([q]))[0]
         bm_rank = hybrid._bm25_ranking(q)
         den_rank = hybrid._dense_ranking(qvec)
 
@@ -42,7 +42,7 @@ async def main():
         for idx in set(bm_rank) | set(den_rank):
             docs[idx] = hybrid.chunks[idx]["meta"]["doc"]
         # 按融合分排序
-        from partical.rag.rrf import rrf
+        from rag.rrf import rrf
         fused = dict(rrf([bm_rank, den_rank]))
         order = sorted(docs, key=lambda i: fused[i], reverse=True)
 

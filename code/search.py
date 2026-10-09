@@ -34,7 +34,7 @@ async def grep_files(args: dict) -> str:
         return (
             "pattern 为空：需要先填 required 参数 pattern，指定要搜索的文本/正则，"
             "才能搜内容。\n\n"
-            "【正确示例】grep_files(pattern='要搜的词', path='partical', "
+            "【正确示例】grep_files(pattern='要搜的词', path='.', "
             "file_pattern='*.py', max_results=50)\n\n"
             f"{_list_files(root0)}"
         )
@@ -134,7 +134,7 @@ grep_files.__tool_schema__ = {
             "Use when: 想找某段代码/字符串/调用/单词在项目的哪些位置出现——"
             "例如搜 `cursor.execute` 确认 SQL 拼接、搜 `TODO`、搜某函数名在哪定义。"
             "Don't use when: 只需要读某个已知文件的完整内容（那用 read_file，不在本工具范围）。\n"
-            "Example: pattern='cursor.execute', path='partical', file_pattern='*.py'。\n"
+            "Example: pattern='cursor.execute', path='.', file_pattern='*.py'。\n"
             "常见错误: pattern 是正则，搜含特殊字符（如 .）要写 `cursor\\.execute`；"
             "路径要指向项目根而不是文件；默认忽略大小写。"
         ),
@@ -159,7 +159,12 @@ async def glob_files(args: dict) -> str:
 
     类比编辑器的"文件面板" / shell 的 `ls -R`。返回匹配的文件路径列表，
     如列出一个目录下所有 .py 文件。
+
+    引擎用标准库 glob.glob（root_dir + recursive），不自己造 glob。默认
+    include_hidden=False 已自动跳过 .git/.venv/.cache 等点开头目录；对
+    node_modules/venv/build 这类非隐藏噪音目录再手动过滤（_GLOB_SKIP_DIRS）。
     """
+    import glob
     path = args.get("path", ".")
     file_pattern = args.get("file_pattern", "**/*")  # 默认递归列出所有(跳过噪音目录)
     max_results = int(args.get("max_results", 200))
@@ -171,76 +176,31 @@ async def glob_files(args: dict) -> str:
     if not os.path.isdir(root):
         return f"错误：路径不存在或不是目录「{root}」"
 
-    # 转成相对 root 的正则：把 ** 递归展开 + 其他 glob 转义
     try:
-        rx = _glob_to_regex(file_pattern)
-    except re.error as e:
+        matches = [
+            m for m in glob.glob(file_pattern, root_dir=root, recursive=True)
+            # 注意：Windows 上 glob 返回反斜杠分隔，先归一成正斜杠再按段过滤
+            if not any(part in _GLOB_SKIP_DIRS for part in m.replace("\\", "/").split("/"))
+        ]
+    except Exception as e:
         return f"错误：无效的 file_pattern「{file_pattern}」—— {e}"
 
-    matches = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        # 过滤噪音目录，避免整棵 .git 被递归
-        dirnames[:] = [d for d in dirnames if d not in _GLOB_SKIP_DIRS]
-        for fname in filenames:
-            if len(matches) >= max_results:
-                break
-            # 相对路径用 / 分隔，好和 pattern 匹配
-            rel = os.path.relpath(os.path.join(dirpath, fname), root).replace("\\", "/")
-            if rx.search(rel):
-                matches.append(os.path.join(dirpath, fname).replace("\\", "/"))
-        if len(matches) >= max_results:
-            break
-
+    # 去重+排序；输出绝对路径(正斜杠)，方便直接喂给 read_file
+    matches = sorted({os.path.join(root, m).replace("\\", "/") for m in matches})
     if not matches:
         return f"在「{root}」下没有匹配 file_pattern「{file_pattern}」的文件。"
 
-    body = "\n".join(matches)
+    total = len(matches)
+    if total > max_results:
+        shown = matches[:max_results] + [f"... (另有 {total - max_results} 条未显示；请收窄 pattern)"]
+    else:
+        shown = matches
+    body = "\n".join(shown)
     return (
-        f"在「{root}」找到 {len(matches)} 个文件匹配「{file_pattern}」（前 {max_results} 条）：\n\n"
+        f"在「{root}」找到 {total} 个文件匹配「{file_pattern}」"
+        f"（显示前 {min(max_results, total)} 条）：\n\n"
         f"{body}\n\n（只列出文件名/路径；要看某个文件内容请用 read_file）"
     )
-
-
-def _glob_to_regex(pat: str) -> re.Pattern:
-    """把类 glob 模式(支持 ** /* / ?)逐字符转成正则 re.Pattern，匹配相对路径。
-
-    - `**/`  匹配零或多层目录前缀(含其结尾斜杠)
-    - `**`   匹配任意剩余路径(含斜杠)
-    - `*`    匹配同层内任意字符(不含 /)
-    - `?`    匹配单个字符(不含 /)
-    """
-    expr = []
-    i = 0
-    n = len(pat)
-    while i < n:
-        c = pat[i]
-        if pat.startswith("**", i):
-            if i + 2 < n and pat[i + 2] == "/":
-                # ** / -> 匹配零或多层目录前缀,把紧跟的斜杠一起吸收掉
-                expr.append("(?:.*/)?")
-                i += 2  # 跳过 **
-                while i < n and pat[i] == "/":
-                    i += 1  # 吃掉 /，避免后面再补一个
-            else:
-                # 末尾的 ** -> 匹配任意剩余路径
-                expr.append(".*")
-                i += 2
-            continue
-        if c == "*":
-            expr.append("[^/]*")
-            i += 1
-            continue
-        if c == "?":
-            expr.append("[^/]")
-            i += 1
-            continue
-        if c == "/":
-            expr.append("/")
-            i += 1
-            continue
-        expr.append(re.escape(c))
-        i += 1
-    return re.compile(f"^{''.join(expr)}$")
 
 
 glob_files.__tool_schema__ = {
@@ -250,10 +210,10 @@ glob_files.__tool_schema__ = {
         "description": (
             "按【文件名模式】递归列出项目里的文件路径，而非按内容搜索（那用 grep_files）。\n"
             "Use when: 想知道某目录下有哪些文件、某个模式的文件在哪、或列出一个项目的结构——"
-            "例如『当前目录下有哪些 .py 文件』『partical/code 目录下都有什么』。"
+            "例如『当前目录下有哪些 .py 文件』『code 目录下都有什么』。"
             "Don't use when: 想按文件【内容】找某段代码（那用 grep_files）、"
             "或想读某个已知文件的内容（那用 read_file）。\n"
-            "Example: path='partical', file_pattern='**/*.py'；"
+            "Example: path='.', file_pattern='**/*.py'；"
             "path='.', file_pattern='*.md'；file_pattern='**/*' 列出全部(跳过隐藏/二进制噪音)。\n"
             "常见错误: file_pattern 是【文件名模式】不是内容关键词；"
             "默认递归列出全部（**/*），可用 '*.py' 只找顶层、'**/*.md' 跨层找注释文档。"

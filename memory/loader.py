@@ -18,7 +18,7 @@ from pathlib import Path
 import yaml
 
 # book 评估集所在目录（相对本文件）
-TEST_CASES_DIR = Path(__file__).resolve().parent.parent.parent / "ai-agent-book" \
+TEST_CASES_DIR = Path(__file__).resolve().parent.parent / "ai-agent-book" \
     / "chapter3" / "user-memory-evaluation" / "test_cases"
 
 # gold_facts 位置

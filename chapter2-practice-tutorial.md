@@ -262,7 +262,7 @@ Step 3: 输出格式：🔴必须修 / 🟡建议修 / 🟢亮点，每条附位
 2. `tools.py` 加一个 `load_skill(name)` 工具：读 `skills/<name>/SKILL.md` 返回全文（进阶：再加 `read_skill_file` 读第三层）。
 
 ```python
-async def _load_skill(args): 
+async def _load_skill(args):
     return open(f"skills/{args['name']}/SKILL.md", encoding="utf-8").read()
 ```
 

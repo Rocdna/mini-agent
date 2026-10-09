@@ -5,7 +5,7 @@ DeepSeek API 底层调用 — 所有模块共用
   - chat_stream(messages):       流式对话（打字机效果，聊天模式用）
   - chat_with_tools(messages):   非流式 + 工具调用（ReAct 模式用）
 
-练习路线（见 partical/chapter2-practice-tutorial.md）：
+练习路线（见 chapter2-practice-tutorial.md）：
   第 0 步：实现 chat_with_tools（非流式 + 工具调用）
   第 2 关：返回值加上 cache_hit_tokens / cache_miss_tokens（观察 KV Cache 命中）
 """

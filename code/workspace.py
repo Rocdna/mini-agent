@@ -1,5 +1,5 @@
 """
-partical.code.workspace — 有界工作区路径解析（bash / write_file / edit_file 共用）。
+code.workspace — 有界工作区路径解析（bash / write_file / edit_file 共用）。
 
 所有"能真写/真跑"的工具（都带 __requires_approval__，执行前经审批门）都写进同一个
 工作区根，路径经 resolve_within_workspace 钳制在根内 —— 审批门是第一道墙，路径圈定

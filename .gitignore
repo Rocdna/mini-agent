@@ -1,0 +1,35 @@
+# Local API credentials; only the empty configuration template is public.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python environments and build artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Runtime memory, vector caches, and agent workspace
+memory/data/
+tests/_demo_tmp/
+rag/data/indexes/
+rag/data_minfa/indexes/
+rag/data_review/indexes/
+rag/data/*.npy
+rag/data/*.pkl
+_coding_workspace/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Optional external book fixtures and local editor settings
+ai-agent-book/
+.vscode/
+.idea/

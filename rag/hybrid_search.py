@@ -13,16 +13,16 @@ hybrid_search — 混合检索（BM25 稀疏 + 稠密向量 → RRF 融合）
     chunk 胜出，补上各自盲区。
 
 用法：
-  python -m partical.rag.eval_hybrid        # 跑 10 条 query 的评估
+  python -m rag.eval_hybrid        # 跑 10 条 query 的评估
 """
 
 import math
 from pathlib import Path
 
-from partical.rag.embedded import embed_texts
-from partical.rag.retriever import build_index, tokenize
-from partical.rag.rrf import rrf
-from partical.rag.vector_store import build_or_load_index
+from rag.embedded import embed_texts
+from rag.retriever import build_index, tokenize
+from rag.rrf import rrf
+from rag.vector_store import build_or_load_index
 
 # RRF 常数（论文常用 60），也可在调用处覆盖
 RRF_K = 60

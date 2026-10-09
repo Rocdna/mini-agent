@@ -1,6 +1,6 @@
 # 代码审查助手测试提示词集
 
-> 用途:在 `python -m partical.main` 的 `你 >` 提示符下,一条条复制进去,验证 Agent 是否
+> 用途:在 `python -m main` 的 `你 >` 提示符下,一条条复制进去,验证 Agent 是否
 > 主动调 `search_knowledge` 检索规范,并引用编号(Rx.y)给出审查结论。
 > 提示:`/agent` 进入 Agent 模式;`/debug` 打开可看每次发给模型的 messages 快照。
 
@@ -108,4 +108,4 @@ except:
 期望:agent 应给出 `R6.1`,而不该去 web_search 或编造编号。
 
 如果能直接命中预期编号,说明 RAG 的规范检索质量 OK;若偏号/检索乱,就去检查
-`partical/rag/data_review/review_standards.md` 的分块和 query 嵌入。
+`rag/data_review/review_standards.md` 的分块和 query 嵌入。

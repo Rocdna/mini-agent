@@ -7,7 +7,7 @@ rag_answer — 把 RAG 检索接进 LLM 生成（RAG 闭环的第一步）
 语料可切换：默认 DEFAULT_CORPUS=《民法典》(910 chunk)，也可传 corpus_root 换成别的大文档。
 
 用法：
-  python -m partical.rag.rag_answer "退款多久到账？"
+  python -m rag.rag_answer "退款多久到账？"
 
 关键点：
   - 复用 hybrid_search.HybridIndex（民法典缓存命中，不重嵌知识库）
@@ -38,7 +38,7 @@ _built_index: dict[str, object] = {}
 
 async def _ensure_built(corpus_root: str | Path | None = DEFAULT_CORPUS):
     """懒构建：首次提问才加载知识库索引，之后复用（按语料区分）。"""
-    from partical.rag.hybrid_search import build
+    from rag.hybrid_search import build
     name = str(corpus_root or DEFAULT_CORPUS)
     if name not in _built_index:
         _built_index[name] = await build(corpus_root)
@@ -100,7 +100,7 @@ search_knowledge.__tool_schema__ = {
 
 async def rag_answer(question: str) -> str:
     """给定问题，检索知识库 top-3 片段，让 LLM 基于片段生成答案。"""
-    from partical.api import chat_stream  # 复用你现有的 LLM 流式封装
+    from api import chat_stream  # 复用你现有的 LLM 流式封装
 
     # 1) 检索：RRF 混合检索 top-3
     idx = await _ensure_built()

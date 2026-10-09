@@ -1,7 +1,7 @@
 """触发验证：跑一条问题，看 Agent 是否【主动】调 search_knowledge 而非 web_search，并引用规范编号。
 
 用法（支持传任意问题）：
-  python -m partical.tests.test_rag_trig "请审查：cursor.execute('SELECT * WHERE id='+uid)"
+  python -m tests.test_rag_trig "请审查：cursor.execute('SELECT * WHERE id='+uid)"
   不带参数则用默认的 SQL 注入审查问题。
 
 模拟 main.do_agent 的组装，但非交互：跑完就退出，打印每步工具调用/结果/最终回答。
@@ -12,7 +12,7 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-from partical.agent_loop import run_agent_loop
+from agent_loop import run_agent_loop
 
 DEFAULT_QUESTION = (
     "请审查下面这条代码有没有安全问题，依据规范给出评价。\n"
@@ -25,8 +25,8 @@ DEFAULT_QUESTION = (
 
 async def real_main():
     # 从 main 拿 system prompt 会触发其模块级 MemoryManager 创建，故延迟导入仅在使用时
-    from partical.main import AGENT_SYSTEM_PROMPT
-    from partical.tools import ALL_TOOLS
+    from main import AGENT_SYSTEM_PROMPT
+    from tools import ALL_TOOLS
 
     question = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_QUESTION
     messages = [

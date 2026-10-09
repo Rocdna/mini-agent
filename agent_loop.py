@@ -16,9 +16,9 @@ import json
 import logging
 from typing import AsyncGenerator, Awaitable, Callable, Optional
 
-from partical.api import chat_stream_with_tools
-from partical.compressor import estimate_tokens, should_compress, compress_tool_results
-from partical.status_bar import StatusBar
+from api import chat_stream_with_tools
+from compressor import estimate_tokens, should_compress, compress_tool_results
+from status_bar import StatusBar
 
 logger = logging.getLogger("agent_loop")
 
@@ -71,9 +71,9 @@ def _tool_result_msg(tool_call_id: str, result: str) -> dict:
 
 # 空参暖机柔推：常见工具的"正确用法"示范，供重复空转提醒时引用
 _NUDGE_EXAMPLES = {
-    "grep_files": "grep_files(pattern='关键词', path='partical', file_pattern='*.py')",
-    "glob_files": "glob_files(path='partical', file_pattern='**/*.py')",
-    "read_file": "read_file(file_path='partical/main.py')",
+    "grep_files": "grep_files(pattern='关键词', path='.', file_pattern='*.py')",
+    "glob_files": "glob_files(path='.', file_pattern='**/*.py')",
+    "read_file": "read_file(file_path='main.py')",
     "execute_code": "execute_code(code='print(1+1)', lang='python', timeout=10)",
     "web_search": "web_search(query='关键词')",
 }

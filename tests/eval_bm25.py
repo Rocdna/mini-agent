@@ -8,7 +8,7 @@ eval_bm25 — 用 test_queries.json 评估 BM25 检索质量
   - q1/q2/q6/q7/q9 等"字面关键字"查询 → BM25 应命中（稀疏检索的强项）
   - q3/q4/q8/q10 等"语义近义、字面不重叠"查询 → BM25 大概率 miss（慢稀疏的死穴）
 
-纯本地，零 API。用法： python -m partical.tests.eval_bm25
+纯本地，零 API。用法： python -m tests.eval_bm25
 """
 
 import json
@@ -23,8 +23,8 @@ except Exception:
 ROOT = Path(__file__).resolve().parent.parent / "rag"
 DATA = ROOT / "data"
 
-from partical.rag.chunker import chunk_text
-from partical.rag.retriever import build_index
+from rag.chunker import chunk_text
+from rag.retriever import build_index
 
 
 def main():

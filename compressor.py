@@ -19,7 +19,7 @@ compressor — 上下文压缩（第 4 关）
 import asyncio
 import logging
 
-from partical.api import chat_with_tools
+from api import chat_with_tools
 
 logger = logging.getLogger("compressor")
 
@@ -107,12 +107,12 @@ async def compress_tool_results(
     return messages
 
 
-# ── 离线演示（python -m partical.compressor）───────────────────
+# ── 离线演示（python -m compressor）───────────────────
 if __name__ == "__main__":
     import asyncio
 
     async def _demo():
-        from partical.tools import ALL_TOOLS  # noqa: F401
+        from tools import ALL_TOOLS  # noqa: F401
         # 造几条"超长搜索结果"样的 tool 消息
         fake = [
             {"role": "user", "content": "对比 langchain 和 llama-index 做 RAG 谁更强？"},

@@ -7,7 +7,7 @@ verify_embedding — 小范围内验证豆包 embedding API 通路 + 语义捕�
   - 语义无关的两句相似度低（如「退款到账」vs「会员积分规则」）
 
 因为要调用付费的方舟 embedding API，默认不自动跑，等你确认后执行：
-  python -m partical.tests.verify_embedding
+  python -m tests.verify_embedding
 """
 
 import asyncio
@@ -38,7 +38,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 async def main():
-    from partical.rag.embedded import embed_texts
+    from rag.embedded import embed_texts
 
     # 关键：同一次请求，批量嵌入 4 句（比逐句快、省请求）
     vecs = await embed_texts(SAMPLES)

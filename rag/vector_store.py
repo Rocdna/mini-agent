@@ -24,7 +24,7 @@ vector_store — 向量存储层（稠密检索的"索引"）
 import json
 from pathlib import Path
 
-from partical.rag.chunker import chunk_text
+from rag.chunker import chunk_text
 
 _DEFAULT_CORPUS = Path(__file__).resolve().parent / "data"
 
@@ -98,7 +98,7 @@ async def build_or_load_index(auto_embed: bool = True,
     texts = [c["text"] for c in chunks]
     print(f"[vector_store] 首次嵌入 {len(texts)} 个 chunk ...")
 
-    from partical.rag.embedded import embed_texts, embedding_dim
+    from rag.embedded import embed_texts, embedding_dim
 
     vecs = await embed_texts(texts)   # 调一次方舟 API
     dim = embedding_dim()

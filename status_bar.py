@@ -50,7 +50,7 @@ class StatusBar:
         return "\n".join(lines)
 
 
-# ── 快速自测（跑 python -m partical.status_bar）────────────────
+# ── 快速自测（跑 python -m status_bar）────────────────
 if __name__ == "__main__":
     bar = StatusBar()
     bar.on_turn()

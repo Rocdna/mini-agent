@@ -13,9 +13,9 @@ run_experiment — 方案B：实验脚本。跑 book 评估集，用 LLM 提炼�
     按单段对话喂最稳，也符合"一段对话提炼一批记忆"的自然粒度。
 
 用法：
-  python -m partical.tests.run_experiment --layer layer1 --case layer1_01 --conv 0 --format simple_notes
+  python -m tests.run_experiment --layer layer1 --case layer1_01 --conv 0 --format simple_notes
   # --dry 只打印将送入 LLM 的消息，不调 API（先审查，再放行）
-  python -m partical.tests.run_experiment --layer layer1 --case layer1_01 --format simple_notes --dry
+  python -m tests.run_experiment --layer layer1 --case layer1_01 --format simple_notes --dry
 """
 
 import argparse
@@ -29,14 +29,14 @@ try:
 except Exception:
     pass
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from partical.agent_loop import run_agent_loop
-from partical.memory import loader
-from partical.memory.formats.simple_notes import SimpleNotes  # 复用其 _flatten 压对话
-from partical.memory.memory_manager import MemoryManager
-from partical.memory.prompts import PROMPTS
-from partical.memory.tools import build_memory_tools
+from agent_loop import run_agent_loop
+from memory import loader
+from memory.formats.simple_notes import SimpleNotes  # 复用其 _flatten 压对话
+from memory.memory_manager import MemoryManager
+from memory.prompts import PROMPTS
+from memory.tools import build_memory_tools
 
 
 def _history_text(conv: dict) -> str:
